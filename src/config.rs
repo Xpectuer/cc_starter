@@ -18,6 +18,9 @@ struct Config {
 }
 
 pub fn config_path() -> PathBuf {
+    if let Ok(p) = std::env::var("CCT_CONFIG") {
+        return PathBuf::from(p);
+    }
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("~/.config"))
         .join("cc-tui")

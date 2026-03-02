@@ -7,11 +7,7 @@ use crossterm::{
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
 
-mod app;
-mod config;
-mod launch;
-mod ui;
-
+use cct::{app, config, launch, ui};
 use app::App;
 
 fn main() -> Result<()> {

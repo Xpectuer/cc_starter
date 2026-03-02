@@ -1,0 +1,5 @@
+#!/bin/sh
+# Fake claude stub for testing.
+# Writes received args to $CCT_TEST_ARGS_FILE (required).
+printf '%s' "$*" > "${CCT_TEST_ARGS_FILE}"
+exit 0
