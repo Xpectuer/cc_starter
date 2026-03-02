@@ -13,7 +13,11 @@ const SENSITIVE: &[&str] = &["TOKEN", "KEY", "SECRET"];
 /// Returns `"***"` if `key` (case-insensitive) contains TOKEN, KEY, or SECRET.
 pub fn mask_value<'a>(key: &str, val: &'a str) -> &'a str {
     let upper = key.to_uppercase();
-    if SENSITIVE.iter().any(|p| upper.contains(p)) { "***" } else { val }
+    if SENSITIVE.iter().any(|p| upper.contains(p)) {
+        "***"
+    } else {
+        val
+    }
 }
 
 pub fn draw(app: &App, frame: &mut Frame) {
@@ -52,7 +56,11 @@ pub fn draw(app: &App, frame: &mut Frame) {
 
     let profile_list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title(" Profiles "))
-        .highlight_style(Style::default().bg(Color::Blue).add_modifier(Modifier::BOLD))
+        .highlight_style(
+            Style::default()
+                .bg(Color::Blue)
+                .add_modifier(Modifier::BOLD),
+        )
         .highlight_symbol("> ");
 
     frame.render_stateful_widget(profile_list, content[0], &mut list_state);
@@ -70,10 +78,9 @@ pub fn draw(app: &App, frame: &mut Frame) {
     frame.render_widget(detail, content[1]);
 
     // --- Footer ---
-    let footer = Paragraph::new(
-        " [↑↓/jk] Navigate  [Enter] Launch  [e] Edit config  [q/Ctrl-C] Quit",
-    )
-    .style(Style::default().fg(Color::DarkGray));
+    let footer =
+        Paragraph::new(" [↑↓/jk] Navigate  [Enter] Launch  [e] Edit config  [q/Ctrl-C] Quit")
+            .style(Style::default().fg(Color::DarkGray));
     frame.render_widget(footer, outer[1]);
 }
 

@@ -31,8 +31,7 @@ fn release_binary_builds() {
         .expect("cargo build --release");
     assert!(status.success(), "release build failed");
 
-    let bin = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target/release/cct");
+    let bin = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/release/cct");
     assert!(bin.exists(), "target/release/cct not found");
 }
 
@@ -63,8 +62,7 @@ fn real_config_loads() {
 fn binary_spawns_cleanly() {
     require_live!();
 
-    let bin = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target/release/cct");
+    let bin = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/release/cct");
     if !bin.exists() {
         eprintln!("Skipped: target/release/cct not found (run release_binary_builds first)");
         return;

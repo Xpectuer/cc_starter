@@ -27,7 +27,8 @@ fn run_exec_profile(envs: Vec<(&str, String)>) -> std::process::Output {
     for (k, v) in envs {
         cmd.env(k, v);
     }
-    cmd.output().expect("spawn cargo run --example exec_profile")
+    cmd.output()
+        .expect("spawn cargo run --example exec_profile")
 }
 
 // --- Test 1: config round-trip ---
@@ -121,7 +122,10 @@ extra_args = ["--verbose"]
     let args_path = args_file.path().to_str().unwrap().to_string();
 
     let output = run_exec_profile(vec![
-        ("CCT_TEST_TOML", toml_file.path().to_str().unwrap().to_string()),
+        (
+            "CCT_TEST_TOML",
+            toml_file.path().to_str().unwrap().to_string(),
+        ),
         ("CCT_TEST_ARGS_FILE", args_path.clone()),
         ("PATH", prepend_path(&helpers_dir())),
     ]);
@@ -170,7 +174,10 @@ CCT_INJECTED_VAR = "hello-from-profile"
     }
 
     let output = run_exec_profile(vec![
-        ("CCT_TEST_TOML", toml_file.path().to_str().unwrap().to_string()),
+        (
+            "CCT_TEST_TOML",
+            toml_file.path().to_str().unwrap().to_string(),
+        ),
         ("CCT_TEST_ARGS_FILE", args_path.clone()),
         ("PATH", prepend_path(tmp_dir.path())),
     ]);

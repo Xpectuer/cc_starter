@@ -82,7 +82,12 @@ mod tests {
         let p = profile(Some("opus"), Some(true), Some(vec!["--verbose"]));
         assert_eq!(
             build_args(&p),
-            vec!["--model", "opus", "--dangerously-skip-permissions", "--verbose"]
+            vec![
+                "--model",
+                "opus",
+                "--dangerously-skip-permissions",
+                "--verbose"
+            ]
         );
     }
 }

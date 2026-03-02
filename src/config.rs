@@ -45,8 +45,7 @@ pub fn ensure_default_config() -> Result<()> {
     let path = config_path();
     if !path.exists() {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("create config dir {parent:?}"))?;
+            fs::create_dir_all(parent).with_context(|| format!("create config dir {parent:?}"))?;
         }
         fs::write(&path, DEFAULT_CONFIG)
             .with_context(|| format!("write default config to {path:?}"))?;
@@ -56,10 +55,9 @@ pub fn ensure_default_config() -> Result<()> {
 
 pub fn load_profiles() -> Result<Vec<Profile>> {
     let path = config_path();
-    let content = fs::read_to_string(&path)
-        .with_context(|| format!("read config {path:?}"))?;
-    let config: Config = toml::from_str(&content)
-        .with_context(|| format!("parse TOML in {path:?}"))?;
+    let content = fs::read_to_string(&path).with_context(|| format!("read config {path:?}"))?;
+    let config: Config =
+        toml::from_str(&content).with_context(|| format!("parse TOML in {path:?}"))?;
     Ok(config.profiles)
 }
 
@@ -87,7 +85,10 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
         assert_eq!(p.name, "kclaude");
         assert_eq!(p.model.as_deref(), Some("kimi-k1.5"));
         assert_eq!(p.skip_permissions, Some(true));
-        assert_eq!(p.extra_args.as_deref(), Some(&["--verbose".to_string()][..]));
+        assert_eq!(
+            p.extra_args.as_deref(),
+            Some(&["--verbose".to_string()][..])
+        );
         let env = p.env.as_ref().unwrap();
         assert_eq!(
             env.get("ANTHROPIC_BASE_URL").map(String::as_str),

@@ -7,8 +7,8 @@ use crossterm::{
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
 
-use cct::{app, config, launch, ui};
 use app::App;
+use cct::{app, config, launch, ui};
 
 fn main() -> Result<()> {
     config::ensure_default_config()?;

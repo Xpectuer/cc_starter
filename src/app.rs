@@ -7,7 +7,10 @@ pub struct App {
 
 impl App {
     pub fn new(profiles: Vec<Profile>) -> Self {
-        Self { profiles, selected: 0 }
+        Self {
+            profiles,
+            selected: 0,
+        }
     }
 
     pub fn next(&mut self) {
