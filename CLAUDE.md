@@ -71,3 +71,17 @@ ANTHROPIC_AUTH_TOKEN = "sk-..."
 | `docs/modules/` | Module/component documentation |
 | `docs/references/` | Reference documents and external resources |
 | `docs/quality/` | Quality reviews and audits |
+
+<!-- BEGIN:module-docs -->
+## Module Documentation
+
+Detailed module docs are in `docs/modules/`:
+
+- [Module Index](docs/modules/index.md) — cross-module dependency graph and global interface index
+- [config](docs/modules/config.md) — TOML deserialization, config path, default bootstrap
+- [app](docs/modules/app.md) — cursor state and circular navigation
+- [ui](docs/modules/ui.md) — ratatui rendering and sensitive-value masking
+- [launch](docs/modules/launch.md) — arg building, exec-replace, editor open
+
+See also: [ARCHITECTURE.md](ARCHITECTURE.md) for the system-level overview.
+<!-- END:module-docs -->
