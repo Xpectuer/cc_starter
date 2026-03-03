@@ -3,6 +3,14 @@ use std::io::{self, BufRead, Write};
 
 use crate::config::{self, NewProfile};
 
+fn mask_key(key: &str) -> String {
+    if key.len() <= 8 {
+        "*".repeat(key.len())
+    } else {
+        format!("{}...{}", &key[..4], &key[key.len() - 4..])
+    }
+}
+
 pub fn run_add() -> Result<()> {
     run_add_with(io::stdin().lock(), io::stdout())
 }
@@ -36,6 +44,26 @@ pub fn run_add_with<R: BufRead, W: Write>(mut reader: R, mut writer: W) -> Resul
         if t.is_empty() { None } else { Some(t) }
     };
 
+    // Base URL (optional)
+    write!(writer, "Base URL (optional): ")?;
+    writer.flush()?;
+    let mut url_line = String::new();
+    reader.read_line(&mut url_line)?;
+    let base_url = {
+        let t = url_line.trim().to_string();
+        if t.is_empty() { None } else { Some(t) }
+    };
+
+    // API Key (optional)
+    write!(writer, "API Key (optional): ")?;
+    writer.flush()?;
+    let mut key_line = String::new();
+    reader.read_line(&mut key_line)?;
+    let api_key = {
+        let t = key_line.trim().to_string();
+        if t.is_empty() { None } else { Some(t) }
+    };
+
     // Model (optional)
     write!(writer, "Model (optional): ")?;
     writer.flush()?;
@@ -50,8 +78,29 @@ pub fn run_add_with<R: BufRead, W: Write>(mut reader: R, mut writer: W) -> Resul
     writeln!(writer)?;
     writeln!(writer, "--- New Profile ---")?;
     writeln!(writer, "  Name:        {}", name)?;
-    writeln!(writer, "  Description: {}", description.as_deref().unwrap_or("(none)"))?;
-    writeln!(writer, "  Model:       {}", model.as_deref().unwrap_or("(none)"))?;
+    writeln!(
+        writer,
+        "  Description: {}",
+        description.as_deref().unwrap_or("(none)")
+    )?;
+    writeln!(
+        writer,
+        "  Base URL:    {}",
+        base_url.as_deref().unwrap_or("(none)")
+    )?;
+    writeln!(
+        writer,
+        "  API Key:     {}",
+        api_key
+            .as_ref()
+            .map(|k| mask_key(k))
+            .unwrap_or_else(|| "(none)".into())
+    )?;
+    writeln!(
+        writer,
+        "  Model:       {}",
+        model.as_deref().unwrap_or("(none)")
+    )?;
     writeln!(writer)?;
 
     // Confirm
@@ -67,6 +116,8 @@ pub fn run_add_with<R: BufRead, W: Write>(mut reader: R, mut writer: W) -> Resul
     let profile = NewProfile {
         name: name.clone(),
         description,
+        base_url,
+        api_key,
         model,
     };
     config::append_profile(&profile)?;
@@ -91,14 +142,20 @@ mod tests {
         assert!(config::profile_name_exists("existing").unwrap());
         assert!(config::profile_name_exists("EXISTING").unwrap());
 
-        // Test that a valid add flow works
-        let input = b"newprofile\nmy desc\nsonnet\ny\n";
+        // Test that a valid add flow works (5 fields: name, desc, base_url, api_key, model)
+        let input = b"newprofile\nmy desc\nhttps://api.example.com\nsk-test\nMiniMax-M2.1\ny\n";
         let mut output: Vec<u8> = Vec::new();
         run_add_with(&input[..], &mut output).unwrap();
 
         let profiles = config::load_profiles().unwrap();
         assert_eq!(profiles.len(), 2);
         assert!(profiles.iter().any(|p| p.name == "newprofile"));
+
+        // Verify env var generation
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("[profiles.env]"));
+        assert!(content.contains("ANTHROPIC_BASE_URL"));
+        assert!(content.contains("ANTHROPIC_MODEL = \"MiniMax-M2.1\""));
 
         std::env::remove_var("CCT_CONFIG");
     }

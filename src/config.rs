@@ -64,6 +64,8 @@ pub fn load_profiles() -> Result<Vec<Profile>> {
 pub struct NewProfile {
     pub name: String,
     pub description: Option<String>,
+    pub base_url: Option<String>,
+    pub api_key: Option<String>,
     pub model: Option<String>,
 }
 
@@ -74,25 +76,50 @@ pub fn profile_name_exists(name: &str) -> Result<bool> {
         .any(|p| p.name.eq_ignore_ascii_case(name)))
 }
 
+/// Returns the non-empty string value if present, or None.
+fn non_empty(opt: &Option<String>) -> Option<&str> {
+    opt.as_deref().filter(|s| !s.is_empty())
+}
+
 pub fn append_profile(profile: &NewProfile) -> Result<()> {
     let path = config_path();
     let mut block = String::from("\n[[profiles]]\n");
     block.push_str(&format!("name = {:?}\n", profile.name));
-    if let Some(desc) = &profile.description {
-        if !desc.is_empty() {
-            block.push_str(&format!("description = {:?}\n", desc));
+    if let Some(desc) = non_empty(&profile.description) {
+        block.push_str(&format!("description = {:?}\n", desc));
+    }
+    if let Some(model) = non_empty(&profile.model) {
+        block.push_str(&format!("model = {:?}\n", model));
+    }
+
+    // Build [profiles.env] section when base_url, api_key, or model are provided
+    let base_url = non_empty(&profile.base_url);
+    let api_key = non_empty(&profile.api_key);
+    let model = non_empty(&profile.model);
+
+    if base_url.is_some() || api_key.is_some() || model.is_some() {
+        block.push_str("\n[profiles.env]\n");
+        if let Some(url) = base_url {
+            block.push_str(&format!("ANTHROPIC_BASE_URL = {:?}\n", url));
+        }
+        if let Some(key) = api_key {
+            block.push_str(&format!("ANTHROPIC_API_KEY = {:?}\n", key));
+        }
+        if let Some(m) = model {
+            block.push_str(&format!("ANTHROPIC_MODEL = {:?}\n", m));
+            block.push_str(&format!("ANTHROPIC_SMALL_FAST_MODEL = {:?}\n", m));
+            block.push_str(&format!("ANTHROPIC_DEFAULT_SONNET_MODEL = {:?}\n", m));
+            block.push_str(&format!("ANTHROPIC_DEFAULT_OPUS_MODEL = {:?}\n", m));
+            block.push_str(&format!("ANTHROPIC_DEFAULT_HAIKU_MODEL = {:?}\n", m));
+            block.push_str("API_TIMEOUT_MS = \"600000\"\n");
+            block.push_str("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = \"1\"\n");
         }
     }
-    if let Some(model) = &profile.model {
-        if !model.is_empty() {
-            block.push_str(&format!("model = {:?}\n", model));
-        }
-    }
-    let mut content = fs::read_to_string(&path)
-        .with_context(|| format!("read config {path:?}"))?;
+
+    let mut content =
+        fs::read_to_string(&path).with_context(|| format!("read config {path:?}"))?;
     content.push_str(&block);
-    fs::write(&path, content)
-        .with_context(|| format!("write config {path:?}"))?;
+    fs::write(&path, content).with_context(|| format!("write config {path:?}"))?;
     Ok(())
 }
 
@@ -157,6 +184,8 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
         let new = NewProfile {
             name: "test-profile".into(),
             description: Some("A test".into()),
+            base_url: None,
+            api_key: None,
             model: Some("claude-sonnet-4-6".into()),
         };
         append_profile(&new).unwrap();
@@ -179,6 +208,8 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
         let new = NewProfile {
             name: "added".into(),
             description: None,
+            base_url: None,
+            api_key: None,
             model: None,
         };
         append_profile(&new).unwrap();
@@ -207,6 +238,200 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
 
     #[test]
     #[serial]
+    fn append_profile_generates_env_section() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(&path, DEFAULT_CONFIG).unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let new = NewProfile {
+            name: "env-test".into(),
+            description: Some("Test env generation".into()),
+            base_url: Some("https://api.example.com".into()),
+            api_key: Some("sk-test-key-123".into()),
+            model: Some("kimi-k2".into()),
+        };
+        append_profile(&new).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        // Must contain [profiles.env] section
+        assert!(
+            content.contains("ANTHROPIC_BASE_URL"),
+            "Expected ANTHROPIC_BASE_URL in output, got:\n{content}"
+        );
+        assert!(
+            content.contains("https://api.example.com"),
+            "Expected base_url value in output"
+        );
+        assert!(
+            content.contains("ANTHROPIC_API_KEY"),
+            "Expected ANTHROPIC_API_KEY in output"
+        );
+        assert!(
+            content.contains("sk-test-key-123"),
+            "Expected api_key value in output"
+        );
+        assert!(
+            content.contains("ANTHROPIC_MODEL"),
+            "Expected ANTHROPIC_MODEL in output"
+        );
+        assert!(
+            content.contains("ANTHROPIC_SMALL_FAST_MODEL"),
+            "Expected ANTHROPIC_SMALL_FAST_MODEL in output"
+        );
+        assert!(
+            content.contains("ANTHROPIC_DEFAULT_SONNET_MODEL"),
+            "Expected ANTHROPIC_DEFAULT_SONNET_MODEL in output"
+        );
+        assert!(
+            content.contains("ANTHROPIC_DEFAULT_OPUS_MODEL"),
+            "Expected ANTHROPIC_DEFAULT_OPUS_MODEL in output"
+        );
+        assert!(
+            content.contains("ANTHROPIC_DEFAULT_HAIKU_MODEL"),
+            "Expected ANTHROPIC_DEFAULT_HAIKU_MODEL in output"
+        );
+        assert!(
+            content.contains("API_TIMEOUT_MS"),
+            "Expected API_TIMEOUT_MS in output"
+        );
+        assert!(
+            content.contains("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"),
+            "Expected CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC in output"
+        );
+
+        // Verify the profile round-trips through TOML parsing
+        let profiles = load_profiles().unwrap();
+        let p = profiles.iter().find(|p| p.name == "env-test").unwrap();
+        let env = p.env.as_ref().expect("env section should exist");
+        assert_eq!(
+            env.get("ANTHROPIC_BASE_URL").map(String::as_str),
+            Some("https://api.example.com")
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_API_KEY").map(String::as_str),
+            Some("sk-test-key-123")
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("kimi-k2")
+        );
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn append_profile_base_url_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(&path, DEFAULT_CONFIG).unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let new = NewProfile {
+            name: "base-url-only".into(),
+            description: Some("Only base URL".into()),
+            base_url: Some("https://api.third-party.com/v1".into()),
+            api_key: None,
+            model: None,
+        };
+        append_profile(&new).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        // Must contain [profiles.env] with ANTHROPIC_BASE_URL
+        assert!(
+            content.contains("[profiles.env]"),
+            "Expected [profiles.env] section in output, got:\n{content}"
+        );
+        assert!(
+            content.contains("ANTHROPIC_BASE_URL"),
+            "Expected ANTHROPIC_BASE_URL in output"
+        );
+        assert!(
+            content.contains("https://api.third-party.com/v1"),
+            "Expected base_url value in output"
+        );
+        // Must NOT contain model-derived env vars
+        assert!(
+            !content.contains("ANTHROPIC_MODEL"),
+            "ANTHROPIC_MODEL should NOT be present when model is None"
+        );
+        assert!(
+            !content.contains("API_TIMEOUT_MS"),
+            "API_TIMEOUT_MS should NOT be present when model is None"
+        );
+
+        // Round-trip verification
+        let profiles = load_profiles().unwrap();
+        let p = profiles
+            .iter()
+            .find(|p| p.name == "base-url-only")
+            .unwrap();
+        let env = p.env.as_ref().expect("env section should exist");
+        assert_eq!(
+            env.get("ANTHROPIC_BASE_URL").map(String::as_str),
+            Some("https://api.third-party.com/v1")
+        );
+        assert!(
+            env.get("ANTHROPIC_MODEL").is_none(),
+            "ANTHROPIC_MODEL should not exist in env"
+        );
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn append_minimal_no_env_section() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(&path, DEFAULT_CONFIG).unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let new = NewProfile {
+            name: "no-env".into(),
+            description: Some("No env vars at all".into()),
+            base_url: None,
+            api_key: None,
+            model: None,
+        };
+        append_profile(&new).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        // The appended block should NOT contain [profiles.env]
+        // Find the appended block by locating name = "no-env"
+        let block_start = content.find("name = \"no-env\"").expect("profile should exist");
+        let appended_block = &content[block_start..];
+        assert!(
+            !appended_block.contains("[profiles.env]"),
+            "Expected NO [profiles.env] section for minimal profile, got:\n{appended_block}"
+        );
+        assert!(
+            !appended_block.contains("ANTHROPIC_BASE_URL"),
+            "Expected NO ANTHROPIC_BASE_URL for minimal profile"
+        );
+        assert!(
+            !appended_block.contains("ANTHROPIC_API_KEY"),
+            "Expected NO ANTHROPIC_API_KEY for minimal profile"
+        );
+        assert!(
+            !appended_block.contains("ANTHROPIC_MODEL"),
+            "Expected NO ANTHROPIC_MODEL for minimal profile"
+        );
+
+        // Round-trip: env should be None
+        let profiles = load_profiles().unwrap();
+        let p = profiles.iter().find(|p| p.name == "no-env").unwrap();
+        assert!(
+            p.env.is_none(),
+            "env section should be None for minimal profile"
+        );
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
     fn append_minimal_profile() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("profiles.toml");
@@ -216,6 +441,8 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
         let new = NewProfile {
             name: "minimal".into(),
             description: None,
+            base_url: None,
+            api_key: None,
             model: None,
         };
         append_profile(&new).unwrap();

@@ -108,10 +108,22 @@ fn run_tui() -> Result<()> {
                                     }
                                 }
                                 let desc = form.fields[1].trim().to_string();
-                                let model = form.fields[2].trim().to_string();
+                                let base_url = form.fields[2].trim().to_string();
+                                let api_key = form.fields[3].trim().to_string();
+                                let model = form.fields[4].trim().to_string();
                                 let new_profile = config::NewProfile {
                                     name,
                                     description: if desc.is_empty() { None } else { Some(desc) },
+                                    base_url: if base_url.is_empty() {
+                                        None
+                                    } else {
+                                        Some(base_url)
+                                    },
+                                    api_key: if api_key.is_empty() {
+                                        None
+                                    } else {
+                                        Some(api_key)
+                                    },
                                     model: if model.is_empty() { None } else { Some(model) },
                                 };
                                 if let Err(e) = config::append_profile(&new_profile) {
@@ -149,7 +161,7 @@ fn run_tui() -> Result<()> {
                             KeyCode::Tab | KeyCode::Down => form.next_field(),
                             KeyCode::BackTab | KeyCode::Up => form.prev_field(),
                             KeyCode::Enter => {
-                                if form.active_field < 2 {
+                                if form.active_field < 4 {
                                     form.next_field();
                                 } else {
                                     form.confirming = true;

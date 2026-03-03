@@ -1,6 +1,6 @@
 use crate::config::Profile;
 
-pub const FIELD_LABELS: [&str; 3] = ["Name *", "Description", "Model"];
+pub const FIELD_LABELS: [&str; 5] = ["Name *", "Description", "Base URL", "API Key", "Model"];
 
 pub enum AppMode {
     Normal,
@@ -8,7 +8,7 @@ pub enum AppMode {
 }
 
 pub struct FormState {
-    pub fields: [String; 3],
+    pub fields: [String; 5],
     pub active_field: usize,
     pub confirming: bool,
     pub error: Option<String>,
@@ -23,7 +23,13 @@ impl Default for FormState {
 impl FormState {
     pub fn new() -> Self {
         Self {
-            fields: [String::new(), String::new(), String::new()],
+            fields: [
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+            ],
             active_field: 0,
             confirming: false,
             error: None,
@@ -31,7 +37,7 @@ impl FormState {
     }
 
     pub fn next_field(&mut self) {
-        self.active_field = (self.active_field + 1).min(2);
+        self.active_field = (self.active_field + 1).min(4);
     }
 
     pub fn prev_field(&mut self) {
@@ -86,8 +92,20 @@ mod tests {
         form.next_field();
         assert_eq!(form.active_field, 2);
 
-        // Should clamp at max (2)
         form.next_field();
+        assert_eq!(form.active_field, 3);
+
+        form.next_field();
+        assert_eq!(form.active_field, 4);
+
+        // Should clamp at max (4)
+        form.next_field();
+        assert_eq!(form.active_field, 4);
+
+        form.prev_field();
+        assert_eq!(form.active_field, 3);
+
+        form.prev_field();
         assert_eq!(form.active_field, 2);
 
         form.prev_field();
@@ -121,5 +139,26 @@ mod tests {
         // Transition back to Normal
         app.mode = AppMode::Normal;
         assert!(matches!(app.mode, AppMode::Normal));
+    }
+
+    #[test]
+    fn form_state_five_fields() {
+        // FIELD_LABELS should have exactly 5 entries with correct labels
+        assert_eq!(FIELD_LABELS.len(), 5, "FIELD_LABELS must have 5 entries");
+        assert_eq!(
+            FIELD_LABELS,
+            ["Name *", "Description", "Base URL", "API Key", "Model"]
+        );
+
+        // FormState.fields should have 5 elements
+        let form = FormState::new();
+        assert_eq!(form.fields.len(), 5, "FormState.fields must have 5 elements");
+
+        // next_field should clamp at 4 (index of last field)
+        let mut form = FormState::new();
+        for _ in 0..10 {
+            form.next_field();
+        }
+        assert_eq!(form.active_field, 4, "next_field must clamp at 4");
     }
 }

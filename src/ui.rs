@@ -156,11 +156,27 @@ fn build_form_lines(form: &FormState) -> Vec<Line<'static>> {
             }
         )));
         lines.push(Line::from(format!(
-            "  Model:       {}",
+            "  Base URL:    {}",
             if form.fields[2].is_empty() {
                 "(none)"
             } else {
                 &form.fields[2]
+            }
+        )));
+        lines.push(Line::from(format!(
+            "  API Key:     {}",
+            if form.fields[3].is_empty() {
+                "(none)".to_string()
+            } else {
+                mask_value("API_KEY", &form.fields[3]).to_string()
+            }
+        )));
+        lines.push(Line::from(format!(
+            "  Model:       {}",
+            if form.fields[4].is_empty() {
+                "(none)"
+            } else {
+                &form.fields[4]
             }
         )));
     } else {
@@ -222,8 +238,8 @@ mod tests {
         form.active_field = 0;
 
         let lines = build_form_lines(&form);
-        // Should have 3 lines (one per field)
-        assert_eq!(lines.len(), 3);
+        // Should have 5 lines (one per field)
+        assert_eq!(lines.len(), 5);
 
         // Active field should have "> " prefix
         let first = lines[0].to_string();
@@ -234,6 +250,70 @@ mod tests {
         let second = lines[1].to_string();
         assert!(second.starts_with("  "), "inactive field should have '  ' prefix");
         assert!(second.contains("A description"));
+    }
+
+    #[test]
+    fn ui_confirmation_shows_five_fields() {
+        let mut form = FormState::new();
+        form.confirming = true;
+        form.fields[0] = "test-profile".into();
+        form.fields[2] = "https://api.example.com".into();
+        form.fields[3] = "sk-secret-key".into();
+        form.fields[4] = "kimi-k2".into();
+
+        let lines = build_form_lines(&form);
+        let text: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+        let joined = text.join("\n");
+
+        // Must contain all five field labels
+        assert!(
+            joined.contains("Name:"),
+            "Expected 'Name:' in confirmation, got:\n{joined}"
+        );
+        assert!(
+            joined.contains("Description:"),
+            "Expected 'Description:' in confirmation, got:\n{joined}"
+        );
+        assert!(
+            joined.contains("Base URL:"),
+            "Expected 'Base URL:' in confirmation, got:\n{joined}"
+        );
+        assert!(
+            joined.contains("API Key:"),
+            "Expected 'API Key:' in confirmation, got:\n{joined}"
+        );
+        assert!(
+            joined.contains("Model:"),
+            "Expected 'Model:' in confirmation, got:\n{joined}"
+        );
+
+        // API key should be masked (mask_value on key containing "KEY" returns "***")
+        assert!(
+            joined.contains("***"),
+            "Expected masked API key '***' in confirmation, got:\n{joined}"
+        );
+        assert!(
+            !joined.contains("sk-secret-key"),
+            "API key should NOT appear in cleartext in confirmation, got:\n{joined}"
+        );
+
+        // Model should show the actual value
+        assert!(
+            joined.contains("kimi-k2"),
+            "Expected model 'kimi-k2' in confirmation, got:\n{joined}"
+        );
+
+        // Base URL should show the actual value
+        assert!(
+            joined.contains("https://api.example.com"),
+            "Expected base URL in confirmation, got:\n{joined}"
+        );
+
+        // Description should show "(none)" since it's empty
+        assert!(
+            joined.contains("(none)"),
+            "Expected '(none)' for empty description, got:\n{joined}"
+        );
     }
 
     #[test]
