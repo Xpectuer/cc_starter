@@ -16,7 +16,8 @@
 |------|-------------|----------|--------|---------|
 | cct-e2e-verification-20260302140000 | docs/drafts/intake-20260302140000 | 13/13 (100%) | completed | 2026-03-02 |
 | tdd-cct-tui-launcher-20260302142400 | docs/drafts/intake-20260302120000 | 10/10 (100%) | completed | 2026-03-02 |
-| tdd-config-add-20260303131839 | docs/drafts/intake-20260303000100 | 11/11 (100%) | active | 2026-03-03 |
+| tdd-config-add-20260303131839 | docs/drafts/intake-20260303000100 | 11/11 (100%) | completed | 2026-03-03 |
+| tdd-config-add-env-20260303164823 | docs/drafts/intake-20260303000100 | 7/7 (100%) | completed | 2026-03-03 |
 
 ---
 Updated: 2026-03-03

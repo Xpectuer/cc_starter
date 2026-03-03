@@ -39,10 +39,11 @@ Each module has no circular dependency; `launch` and `ui` both depend on `config
 
 | Module | File | Responsibility |
 |--------|------|----------------|
-| `config` | `src/config.rs` | Deserialize `profiles.toml` via serde/toml; write default config on first run |
-| `app` | `src/app.rs` | Cursor state (`selected` index) and list navigation (`next`/`prev`) |
-| `ui` | `src/ui.rs` | ratatui rendering — 35/65 split list+detail panel + footer; masks sensitive env vars |
+| `config` | `src/config.rs` | Deserialize `profiles.toml` via serde/toml; write default config on first run; append new profiles with auto-generated `[profiles.env]` |
+| `app` | `src/app.rs` | Cursor state (`selected` index), list navigation (`next`/`prev`), `AppMode` (Normal/AddForm), 5-field `FormState` for inline add form |
+| `ui` | `src/ui.rs` | ratatui rendering — 35/65 split list+detail/form panel + footer; masks sensitive env vars; `AppMode`-dispatched rendering |
 | `launch` | `src/launch.rs` | Build `claude` CLI args from a profile; `exec()` the process (Unix process replace); open `$EDITOR` |
+| `cli` | `src/cli.rs` | `cct add` interactive CLI subcommand — 5 prompts (name, description, base\_url, api\_key, model), masked summary, duplicate guard |
 
 ## Critical Path
 
@@ -52,20 +53,48 @@ src/main.rs (entry point)
   → config::ensure_default_config()   # create ~/.config/cc-tui/profiles.toml if absent
   → config::load_profiles()           # parse TOML → Vec<Profile>
   → crossterm: enable_raw_mode + EnterAlternateScreen
-  → App::new(profiles)                # initialize cursor at index 0
+  → App::new(profiles)                # initialize cursor at index 0, mode = Normal
   → loop:
-      tui.draw(|f| ui::draw(&app, f)) # render list + detail + footer
+      tui.draw(|f| ui::draw(&app, f)) # render list + detail/form + footer
       event::read()                    # block on keypress
 ```
 
 ### Main Use Case — Launch Profile
 ```
-User presses [Enter]
+User presses [Enter] (mode = Normal)
   → launch::restore_terminal()        # disable raw mode, LeaveAlternateScreen
   → launch::exec_claude(&profile)
       → env::set_var(k, v) for each profile.env entry
       → launch::build_args(profile)   # --model, --dangerously-skip-permissions, extra_args
       → Command::new("claude").args(...).exec()  # Unix exec — process replaced, no return
+```
+
+### Add Profile — TUI Form (key `a`)
+```
+User presses [a] (mode = Normal)
+  → app.mode = AppMode::AddForm(FormState::new())
+  → TUI renders 5-field form (Name *, Description, Base URL, API Key, Model)
+  → User fills fields (Tab/↑↓ navigate, Backspace edits)
+  → User presses [Enter] on last field → form.confirming = true
+  → TUI shows confirmation summary (API Key masked via mask_value)
+  → User presses [y]
+      → config::profile_name_exists(name) guard
+      → config::append_profile(&NewProfile { name, description, base_url, api_key, model })
+          → writes [[profiles]] block + [profiles.env] (if any env field non-empty)
+      → config::load_profiles()       # reload to pick up new profile
+      → app.selected = index of new profile
+      → app.mode = AppMode::Normal
+```
+
+### Add Profile — CLI (`cct add`)
+```
+cct add
+  → cli::run_add()
+      → 5 sequential prompts (name required, rest optional)
+      → duplicate name check via config::profile_name_exists
+      → masked summary display (API Key shown as "sk-1...key4")
+      → Save? (y/n) confirmation
+      → config::append_profile(&NewProfile { ... })
 ```
 
 ### Hot-reload Config (key `e`)
@@ -89,6 +118,9 @@ User presses [e]
 | `profiles[].skip_permissions = true` | Adds `--dangerously-skip-permissions` to `claude` invocation |
 | `profiles[].extra_args = [...]` | Appended verbatim after other flags |
 | `profiles[].env.*` | Injected as process environment variables before exec |
+| Add-flow `base_url` → `ANTHROPIC_BASE_URL` | Auto-written to `[profiles.env]` by `append_profile` |
+| Add-flow `api_key` → `ANTHROPIC_API_KEY` | Auto-written to `[profiles.env]` by `append_profile` |
+| Add-flow `model` → 5 model alias env vars + `API_TIMEOUT_MS` + `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | Auto-written to `[profiles.env]` by `append_profile` when model is non-empty |
 | `CCT_LIVE_TESTS=1` | Enables the live E2E test suite (requires real `claude` binary) |
 | `CCT_TEST_TOML` | Integration test: override config path for subprocess exec test |
 | `CCT_TEST_ARGS_FILE` | Integration test: fake `claude` stub writes captured args here |
@@ -124,8 +156,10 @@ graph TB
 ## Key Design Decisions
 
 - **`exec` not `spawn`**: `launch::exec_claude` uses Unix `exec` so `claude` inherits the terminal cleanly; there is no return path on success.
-- **`ui::mask_value`**: Redacts any env key containing `TOKEN`, `KEY`, or `SECRET` in the detail panel.
+- **`ui::mask_value`**: Redacts any env key containing `TOKEN`, `KEY`, or `SECRET` in the detail panel and add-form confirmation.
 - **Config hot-reload on `e`**: Editor opens, then profiles are re-parsed in-place without process restart.
-- **No shared mutable state**: Each module is self-contained; `App` owns `Vec<Profile>` and is the single source of truth for cursor position.
+- **No shared mutable state**: Each module is self-contained; `App` owns `Vec<Profile>` and is the single source of truth for cursor position and UI mode.
+- **Auto-env-var generation on add**: When `base_url`, `api_key`, or `model` are provided in the add flow, `config::append_profile` generates a complete `[profiles.env]` block covering all Anthropic env var names needed for third-party endpoints, avoiding manual configuration errors.
+- **Dual add surface (CLI + TUI)**: `cct add` (CLI) and `a` key (TUI) both funnel through `config::append_profile`, keeping the TOML serialization logic in one place.
 
 <!-- END:architecture -->

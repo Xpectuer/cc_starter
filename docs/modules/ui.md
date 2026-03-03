@@ -3,6 +3,8 @@ doc_type: module
 module_name: "ui"
 module_path: "src/ui.rs"
 generated_by: mci-phase-2
+revision: 2
+updated: 2026-03-03
 ---
 
 # ui Module Documentation
@@ -27,14 +29,17 @@ generated_by: mci-phase-2
   - Parameters: `key` — the environment variable name (any case); `val` — the original value (lifetime-tied to caller's string).
   - Returns: `"***"` (a `'static` str coerced to `'a`) if the uppercased `key` contains any of `TOKEN`, `KEY`, or `SECRET`; otherwise returns `val` unchanged.
   - No heap allocation on the masking path; the `"***"` literal satisfies the `'a` bound because the caller's lifetime is at least as long as `'static`.
+  - Also used internally by `build_form_lines` to mask the API Key field in the confirmation summary.
 
 - `pub fn draw(app: &App, frame: &mut Frame)`
   - The single entry point called each render tick from the `crossterm`/ratatui event loop in `main`.
   - Accepts a shared reference to the current `App` state and a mutable ratatui `Frame`.
   - Internally performs three rendering passes in order:
     1. Profile list (left 35%) — stateful `List` widget with blue highlight and `"> "` symbol.
-    2. Detail panel (right 65%) — word-wrapped `Paragraph` built by the private `build_detail` helper.
-    3. Footer (bottom 1 line) — static key-binding hint in `DarkGray`.
+    2. Detail panel (right 65%) — dispatched on `app.mode`:
+       - `AppMode::Normal` → `build_detail` for the selected profile.
+       - `AppMode::AddForm(form)` → `build_form_lines` for the inline add form.
+    3. Footer (bottom 1 line) — key-binding hint in `DarkGray`; content changes based on `app.mode` and `form.confirming`.
   - Has no return value; all output goes through `frame.render_widget` / `frame.render_stateful_widget`.
 
 ### Private Functions (documented for maintainers)
@@ -43,6 +48,13 @@ generated_by: mci-phase-2
   - Constructs the detail panel text from a single `Profile`.
   - Fields rendered in order: description, blank line, model, skip_permissions checkmark (`✓`), extra_args, blank line, `ENV:` section (sorted alphabetically, values masked).
   - Returns owned `Vec<Line<'static>>` via `.clone()` / `format!()` so the caller does not hold a reference into `profile`.
+
+- `fn build_form_lines(form: &FormState) -> Vec<Line<'static>>`
+  - Constructs the add-form panel content from `FormState`.
+  - **Edit view** (`form.confirming == false`): renders one line per field using `FIELD_LABELS`, prefixing the active field with `"> "` (cyan + bold) and inactive fields with `"  "` (default style).
+  - **Confirmation view** (`form.confirming == true`): renders a summary of all 5 fields with the API Key masked via `mask_value("API_KEY", ...)`. Empty optional fields are shown as `"(none)"`.
+  - Appends a red error line if `form.error` is `Some`.
+  - Returns owned `Vec<Line<'static>>`.
 <!-- END:interface -->
 
 ---
@@ -50,12 +62,12 @@ generated_by: mci-phase-2
 <!-- BEGIN:dependency_graph -->
 ## 2. Dependency Graph
 
-- **Imports from `crate::app`** — uses `App { profiles: Vec<Profile>, selected: usize }` as the sole read-only data source for the entire render pass.
+- **Imports from `crate::app`** — uses `App`, `AppMode`, `FormState`, and `FIELD_LABELS`. `App` carries all mutable state; `AppMode` drives the detail-panel dispatch; `FormState` is the form data model; `FIELD_LABELS` provides field label text.
 - **Imports from `crate::config`** — uses the `Profile` struct (fields: `name`, `description`, `model`, `skip_permissions`, `extra_args`, `env`) to build detail lines; `Profile` is passed by reference through `App`.
 - **Imports from `ratatui`** (external crate, not a project module):
   - `layout::{Constraint, Direction, Layout}` — geometric splitting of the terminal area.
-  - `style::{Color, Modifier, Style}` — color and bold styling for highlight and footer.
-  - `text::Line` — the line type used in `build_detail`'s return value.
+  - `style::{Color, Modifier, Style}` — color and bold styling for highlight, form active-field, and footer.
+  - `text::Line` — the line type used in `build_detail` and `build_form_lines` return values.
   - `widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap}` — all rendered widget types.
   - `Frame` — the render target passed in from `main`.
 - **Does NOT depend on**: `crate::config` directly for I/O (no file reads), `crate::launch` (no process exec), or any async runtime. The module performs zero I/O.
@@ -171,8 +183,8 @@ assert_eq!(display, "https://api.anthropic.com");
 
 ## Quality Gate Checklist
 
-- [x] **Interface**: 3 public interface points documented (SENSITIVE const, mask_value, draw) plus private build_detail for maintainers
-- [x] **Dependencies**: All internal module dependencies listed with field-level reasoning; ratatui imports enumerated
+- [x] **Interface**: 4 public/private interface points documented (SENSITIVE const, mask_value, draw, build_form_lines) plus private build_detail for maintainers
+- [x] **Dependencies**: All internal module dependencies listed with field-level reasoning; ratatui imports enumerated; new `AppMode`, `FormState`, `FIELD_LABELS` imports documented
 - [x] **State Management**: Clearly stateless; ListState lifecycle explained per-frame
 - [x] **Edge Cases**: 6 special cases identified — empty profiles, masking substring logic, case-insensitivity, env sort order, layout split remainder, skip_permissions omission behavior
 - [x] **Usage Example**: Rust pseudocode shows realistic event-loop integration and standalone mask_value usage
@@ -181,4 +193,4 @@ assert_eq!(display, "https://api.anthropic.com");
 ---
 
 **Template Version**: 2.0
-**Last Updated**: 2026-03-03
+**Last Updated**: 2026-03-03 (revision 2 — added AppMode dispatch, build_form_lines, updated dependency graph)

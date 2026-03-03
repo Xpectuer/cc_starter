@@ -3,6 +3,8 @@ doc_type: module
 module_name: "config"
 module_path: "src/config.rs"
 generated_by: mci-phase-2
+revision: 2
+updated: 2026-03-03
 ---
 
 # config Module Documentation
@@ -17,7 +19,7 @@ generated_by: mci-phase-2
 
 ### Exported Types
 
-- `struct Profile` — Represents one launch profile. All fields except `name` are optional:
+- `struct Profile` — Represents one launch profile loaded from TOML. All fields except `name` are optional:
   - `name: String` — Unique display name shown in the TUI list.
   - `description: Option<String>` — Human-readable description shown in the detail panel.
   - `env: Option<HashMap<String, String>>` — Environment variables injected before exec.
@@ -25,6 +27,13 @@ generated_by: mci-phase-2
   - `skip_permissions: Option<bool>` — When `true`, adds `--dangerously-skip-permissions` to the `claude` invocation.
   - `model: Option<String>` — When set, adds `--model <value>` to the `claude` invocation.
   - Derives: `Debug`, `Deserialize`, `Clone`.
+
+- `struct NewProfile` — Input type for creating a new profile via `append_profile`. All fields except `name` are optional:
+  - `name: String` — Required profile name (must be unique, case-insensitive).
+  - `description: Option<String>` — Human-readable description.
+  - `base_url: Option<String>` — When set, written as `ANTHROPIC_BASE_URL` in `[profiles.env]`.
+  - `api_key: Option<String>` — When set, written as `ANTHROPIC_API_KEY` in `[profiles.env]`.
+  - `model: Option<String>` — When set, written as `model = ...` in `[[profiles]]` and as 5 model alias env vars plus `API_TIMEOUT_MS` and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` in `[profiles.env]`.
 
 ### Exported Functions
 
@@ -44,6 +53,20 @@ generated_by: mci-phase-2
   - Parses the full TOML document into the private `Config` struct (which holds `profiles: Vec<Profile>`).
   - Returns the unwrapped `Vec<Profile>` to callers; the outer `Config` wrapper is not exposed.
   - Returns `anyhow::Result<Vec<Profile>>`; propagates I/O and parse errors with context messages.
+
+- `profile_name_exists(name: &str) -> Result<bool>`
+  - Calls `load_profiles()` and returns `true` if any profile's name matches `name` case-insensitively.
+  - Used by both `cli::run_add_with` and the TUI AddForm to guard against duplicate names before appending.
+
+- `append_profile(profile: &NewProfile) -> Result<()>`
+  - Appends a new `[[profiles]]` block (and optional `[profiles.env]` block) to the existing config file.
+  - **Env-var generation rules** (when `[profiles.env]` is emitted):
+    - `base_url` present → `ANTHROPIC_BASE_URL = "<value>"`
+    - `api_key` present → `ANTHROPIC_API_KEY = "<value>"`
+    - `model` present → `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL` all set to `<value>`; plus `API_TIMEOUT_MS = "600000"` and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"`.
+    - `[profiles.env]` section is omitted entirely when none of the above fields are non-empty.
+  - Reads then appends (never rewrites) the config file to preserve comments and ordering of existing profiles.
+  - Uses the private `non_empty()` helper to skip blank strings.
 
 ### Private Constants
 
@@ -200,7 +223,7 @@ fn main() -> anyhow::Result<()> {
 
 ## Quality Gate Checklist
 
-- [x] **Interface**: 2 exported types (`Profile`, `Config` private) + 3 public functions + 1 constant documented
+- [x] **Interface**: 3 exported types (`Profile`, `NewProfile`; `Config` private) + 5 public functions + 1 constant documented
 - [x] **Dependencies**: All external crates (`serde`, `toml`, `anyhow`, `dirs`) and std modules listed with reasoning; internal leaf status stated
 - [x] **State Management**: Clearly stateless at runtime; on-disk state lifecycle documented with hot-reload pattern explained
 - [x] **Edge Cases**: 6 cases identified — CCT_CONFIG override, missing XDG dir, TOML parse errors, DEFAULT_CONFIG bootstrap, empty profiles list, file permissions
@@ -210,4 +233,4 @@ fn main() -> anyhow::Result<()> {
 ---
 
 **Template Version**: 2.0
-**Last Updated**: 2026-03-03
+**Last Updated**: 2026-03-03 (revision 2 — added NewProfile, append_profile, profile_name_exists)

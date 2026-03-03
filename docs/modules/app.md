@@ -3,6 +3,8 @@ doc_type: module
 module_name: "app"
 module_path: "src/app.rs"
 generated_by: mci-phase-2
+revision: 2
+updated: 2026-03-03
 ---
 
 # app Module Documentation
@@ -15,22 +17,46 @@ generated_by: mci-phase-2
 <!-- BEGIN:interface -->
 ## 1. Interface
 
-### Exported Struct
+### Exported Constants
 
-- `pub struct App` — sole exported type; holds all runtime UI state.
+- `pub const FIELD_LABELS: [&str; 5]` — ordered labels for the 5 add-form fields: `["Name *", "Description", "Base URL", "API Key", "Model"]`. Used by `ui::build_form_lines` to render field labels and by tests to assert the contract.
 
-### Fields
+### Exported Enums
 
-- `pub profiles: Vec<Profile>` — ordered list of profiles loaded from `~/.config/cc-tui/profiles.toml`; may be replaced in-place during hot-reload without restarting the process.
-- `pub selected: usize` — zero-based index of the currently highlighted profile row in the TUI list.
+- `pub enum AppMode` — discriminates between the two runtime UI modes:
+  - `Normal` — standard profile-list view; navigation and launch are active.
+  - `AddForm(FormState)` — inline profile add form is visible; keyboard input goes to the form.
 
-### Methods
+### Exported Structs
 
-- `App::new(profiles: Vec<Profile>) -> Self` — constructs an `App` with `selected` initialised to `0`; accepts an empty vec without panicking.
-- `app.next(&mut self)` — advances `selected` by one position, wrapping from the last index back to `0` (circular); no-op when `profiles` is empty.
-- `app.prev(&mut self)` — retreats `selected` by one position, wrapping from `0` to the last index (circular); no-op when `profiles` is empty.
+- `pub struct FormState` — holds the transient state of the inline add form:
+  - `pub fields: [String; 5]` — one string buffer per field (Name, Description, Base URL, API Key, Model).
+  - `pub active_field: usize` — index of the currently focused field (0–4); clamped by `next_field`/`prev_field`.
+  - `pub confirming: bool` — when `true`, the form shows the confirmation summary view instead of the edit view.
+  - `pub error: Option<String>` — inline validation error displayed below the form (e.g., "Name is required" or "Profile already exists").
+  - Derives: `Default` (via manual impl that calls `FormState::new()`).
 
-**Quality Check**: 4 public interface points documented (struct, 2 fields, constructor, 2 navigation methods).
+- `pub struct App` — sole owner of all runtime TUI state.
+
+### App Fields
+
+- `pub profiles: Vec<Profile>` — ordered list of profiles loaded from `~/.config/cc-tui/profiles.toml`; may be replaced in-place during hot-reload.
+- `pub selected: usize` — zero-based index of the currently highlighted profile row.
+- `pub mode: AppMode` — current UI mode; `Normal` on construction.
+
+### App Methods
+
+- `App::new(profiles: Vec<Profile>) -> Self` — constructs an `App` with `selected = 0` and `mode = AppMode::Normal`.
+- `app.next(&mut self)` — advances `selected` by one, wrapping circularly; no-op when `profiles` is empty.
+- `app.prev(&mut self)` — retreats `selected` by one, wrapping circularly; no-op when `profiles` is empty.
+
+### FormState Methods
+
+- `FormState::new() -> Self` — constructs with all fields empty, `active_field = 0`, `confirming = false`, `error = None`.
+- `form.next_field(&mut self)` — advances `active_field` by one, clamped at `4` (index of the last field).
+- `form.prev_field(&mut self)` — retreats `active_field` by one, clamped at `0` via `saturating_sub`.
+
+**Quality Check**: 10 public interface points documented (2 constants, 1 enum, 2 structs, 5 methods).
 <!-- END:interface -->
 
 ---
@@ -55,6 +81,8 @@ generated_by: mci-phase-2
 
 - **`selected` field** — mutated in-place by `next()` and `prev()` on every keypress. Its lifecycle begins at `0` (construction) and ends when the process is exec-replaced or exits. It never touches disk.
 - **`profiles` field** — initially set from `config::load_profiles()` in `main`. On hot-reload (key `e`), `main.rs` replaces `app.profiles` entirely with a freshly parsed `Vec<Profile>`. After replacement, `main.rs` clamps `selected` with `app.selected = app.profiles.len().saturating_sub(1)` if the cursor is now out of bounds (the clamp logic lives in the caller, not in `App` itself).
+- **`mode` field** — transitions between `AppMode::Normal` and `AppMode::AddForm(FormState)`. The `AddForm` variant owns a `FormState` by value. When the form is saved or cancelled, `mode` is set back to `Normal`. The `FormState` is dropped when `Normal` is entered.
+- **`FormState.fields`** — five `String` buffers edited in-place by the event loop as the user types. On form save, `main.rs` reads fields by index (0=Name, 1=Description, 2=Base URL, 3=API Key, 4=Model), constructs a `config::NewProfile`, and calls `config::append_profile`.
 - **Circular wrapping** — `next()` uses `% profiles.len()` and `prev()` explicitly wraps from `0` to `len - 1`, so `selected` is always a valid index whenever the list is non-empty.
 - **No interior mutability** — there are no `Mutex`, `RefCell`, or `Arc` wrappers; the caller holds a single `&mut App` and drives all mutations sequentially from the event loop.
 
@@ -151,9 +179,9 @@ fn main() -> anyhow::Result<()> {
 
 ## Quality Gate Checklist
 
-- [x] **Interface**: 4 public interface points documented (struct, 2 fields, 3 methods)
+- [x] **Interface**: 10 public interface points documented (constant, enum, 2 structs, 5 methods)
 - [x] **Dependencies**: Single internal dependency (`crate::config::Profile`) listed with reasoning; no external crates
-- [x] **State Management**: Stateful; mutation points, ownership, and hot-reload lifecycle documented
+- [x] **State Management**: Stateful; mutation points, ownership, mode transitions, and hot-reload lifecycle documented
 - [x] **Edge Cases**: 4 special cases identified (empty list, out-of-bounds after reload, single-item list, usize underflow guard)
 - [x] **Usage Example**: Rust pseudocode mirrors actual `main.rs` patterns with annotations
 - [x] **YAML Frontmatter**: `doc_type`, `module_name`, `module_path` present
@@ -161,4 +189,4 @@ fn main() -> anyhow::Result<()> {
 ---
 
 **Template Version**: 2.0
-**Generated**: 2026-03-03
+**Last Updated**: 2026-03-03 (revision 2 — added AppMode, FormState, FIELD_LABELS)
