@@ -152,7 +152,11 @@ mod tests {
 
         // FormState.fields should have 5 elements
         let form = FormState::new();
-        assert_eq!(form.fields.len(), 5, "FormState.fields must have 5 elements");
+        assert_eq!(
+            form.fields.len(),
+            5,
+            "FormState.fields must have 5 elements"
+        );
 
         // next_field should clamp at 4 (index of last field)
         let mut form = FormState::new();

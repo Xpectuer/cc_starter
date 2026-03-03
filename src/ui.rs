@@ -189,9 +189,7 @@ fn build_form_lines(form: &FormState) -> Vec<Line<'static>> {
             } else {
                 Style::default()
             };
-            lines.push(
-                Line::from(format!("{}{}: {}", prefix, label, form.fields[i])).style(style),
-            );
+            lines.push(Line::from(format!("{}{}: {}", prefix, label, form.fields[i])).style(style));
         }
     }
 
@@ -243,12 +241,18 @@ mod tests {
 
         // Active field should have "> " prefix
         let first = lines[0].to_string();
-        assert!(first.starts_with("> "), "active field should have '> ' prefix, got: {first}");
+        assert!(
+            first.starts_with("> "),
+            "active field should have '> ' prefix, got: {first}"
+        );
         assert!(first.contains("my-profile"));
 
         // Non-active fields should have "  " prefix
         let second = lines[1].to_string();
-        assert!(second.starts_with("  "), "inactive field should have '  ' prefix");
+        assert!(
+            second.starts_with("  "),
+            "inactive field should have '  ' prefix"
+        );
         assert!(second.contains("A description"));
     }
 

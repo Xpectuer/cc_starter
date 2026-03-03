@@ -71,9 +71,7 @@ pub struct NewProfile {
 
 pub fn profile_name_exists(name: &str) -> Result<bool> {
     let profiles = load_profiles()?;
-    Ok(profiles
-        .iter()
-        .any(|p| p.name.eq_ignore_ascii_case(name)))
+    Ok(profiles.iter().any(|p| p.name.eq_ignore_ascii_case(name)))
 }
 
 /// Returns the non-empty string value if present, or None.
@@ -116,8 +114,7 @@ pub fn append_profile(profile: &NewProfile) -> Result<()> {
         }
     }
 
-    let mut content =
-        fs::read_to_string(&path).with_context(|| format!("read config {path:?}"))?;
+    let mut content = fs::read_to_string(&path).with_context(|| format!("read config {path:?}"))?;
     content.push_str(&block);
     fs::write(&path, content).with_context(|| format!("write config {path:?}"))?;
     Ok(())
@@ -363,10 +360,7 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
 
         // Round-trip verification
         let profiles = load_profiles().unwrap();
-        let p = profiles
-            .iter()
-            .find(|p| p.name == "base-url-only")
-            .unwrap();
+        let p = profiles.iter().find(|p| p.name == "base-url-only").unwrap();
         let env = p.env.as_ref().expect("env section should exist");
         assert_eq!(
             env.get("ANTHROPIC_BASE_URL").map(String::as_str),
@@ -400,7 +394,9 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
         let content = std::fs::read_to_string(&path).unwrap();
         // The appended block should NOT contain [profiles.env]
         // Find the appended block by locating name = "no-env"
-        let block_start = content.find("name = \"no-env\"").expect("profile should exist");
+        let block_start = content
+            .find("name = \"no-env\"")
+            .expect("profile should exist");
         let appended_block = &content[block_start..];
         assert!(
             !appended_block.contains("[profiles.env]"),

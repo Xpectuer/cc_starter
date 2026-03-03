@@ -41,7 +41,11 @@ pub fn run_add_with<R: BufRead, W: Write>(mut reader: R, mut writer: W) -> Resul
     reader.read_line(&mut desc_line)?;
     let description = {
         let t = desc_line.trim().to_string();
-        if t.is_empty() { None } else { Some(t) }
+        if t.is_empty() {
+            None
+        } else {
+            Some(t)
+        }
     };
 
     // Base URL (optional)
@@ -51,7 +55,11 @@ pub fn run_add_with<R: BufRead, W: Write>(mut reader: R, mut writer: W) -> Resul
     reader.read_line(&mut url_line)?;
     let base_url = {
         let t = url_line.trim().to_string();
-        if t.is_empty() { None } else { Some(t) }
+        if t.is_empty() {
+            None
+        } else {
+            Some(t)
+        }
     };
 
     // API Key (optional)
@@ -61,7 +69,11 @@ pub fn run_add_with<R: BufRead, W: Write>(mut reader: R, mut writer: W) -> Resul
     reader.read_line(&mut key_line)?;
     let api_key = {
         let t = key_line.trim().to_string();
-        if t.is_empty() { None } else { Some(t) }
+        if t.is_empty() {
+            None
+        } else {
+            Some(t)
+        }
     };
 
     // Model (optional)
@@ -71,7 +83,11 @@ pub fn run_add_with<R: BufRead, W: Write>(mut reader: R, mut writer: W) -> Resul
     reader.read_line(&mut model_line)?;
     let model = {
         let t = model_line.trim().to_string();
-        if t.is_empty() { None } else { Some(t) }
+        if t.is_empty() {
+            None
+        } else {
+            Some(t)
+        }
     };
 
     // Summary
