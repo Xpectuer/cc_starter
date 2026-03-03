@@ -12,6 +12,7 @@ name = "cct"
 path = "src/main.rs"
 
 [dependencies]
+clap      = { version = "4", features = ["derive"] }
 ratatui   = "0.29"
 crossterm = "0.28"
 serde     = { version = "1", features = ["derive"] }
@@ -21,3 +22,4 @@ anyhow    = "1"
 
 [dev-dependencies]
 tempfile = "3"
+serial_test = "3"

@@ -1,4 +1,4 @@
-use crate::app::App;
+use crate::app::{App, AppMode, FormState, FIELD_LABELS};
 use crate::config::Profile;
 use ratatui::{
     layout::{Constraint, Direction, Layout},
@@ -66,21 +66,42 @@ pub fn draw(app: &App, frame: &mut Frame) {
     frame.render_stateful_widget(profile_list, content[0], &mut list_state);
 
     // --- Detail panel ---
-    let detail_lines = if app.profiles.is_empty() {
-        vec![Line::from("Select a profile to see details.")]
-    } else {
-        build_detail(&app.profiles[app.selected])
-    };
-
-    let detail = Paragraph::new(detail_lines)
-        .block(Block::default().borders(Borders::ALL).title(" Details "))
-        .wrap(Wrap { trim: false });
-    frame.render_widget(detail, content[1]);
+    match &app.mode {
+        AppMode::AddForm(form) => {
+            let detail_lines = build_form_lines(form);
+            let detail = Paragraph::new(detail_lines)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" Add Profile "),
+                )
+                .wrap(Wrap { trim: false });
+            frame.render_widget(detail, content[1]);
+        }
+        AppMode::Normal => {
+            let detail_lines = if app.profiles.is_empty() {
+                vec![Line::from("Select a profile to see details.")]
+            } else {
+                build_detail(&app.profiles[app.selected])
+            };
+            let detail = Paragraph::new(detail_lines)
+                .block(Block::default().borders(Borders::ALL).title(" Details "))
+                .wrap(Wrap { trim: false });
+            frame.render_widget(detail, content[1]);
+        }
+    }
 
     // --- Footer ---
-    let footer =
-        Paragraph::new(" [↑↓/jk] Navigate  [Enter] Launch  [e] Edit config  [q/Ctrl-C] Quit")
-            .style(Style::default().fg(Color::DarkGray));
+    let footer_text = match &app.mode {
+        AppMode::Normal => {
+            " [↑↓/jk] Navigate  [Enter] Launch  [a] Add  [e] Edit config  [q/Ctrl-C] Quit"
+        }
+        AppMode::AddForm(form) if form.confirming => " [y] Save  [n/Esc] Back",
+        AppMode::AddForm(_) => {
+            " [Tab/↓] Next field  [Shift-Tab/↑] Prev  [Enter] Confirm  [Esc] Cancel"
+        }
+    };
+    let footer = Paragraph::new(footer_text).style(Style::default().fg(Color::DarkGray));
     frame.render_widget(footer, outer[1]);
 }
 
@@ -117,6 +138,55 @@ fn build_detail(profile: &Profile) -> Vec<Line<'static>> {
     lines
 }
 
+fn build_form_lines(form: &FormState) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
+    if form.confirming {
+        lines.push(
+            Line::from("Save this profile?").style(Style::default().add_modifier(Modifier::BOLD)),
+        );
+        lines.push(Line::from(""));
+        lines.push(Line::from(format!("  Name:        {}", form.fields[0])));
+        lines.push(Line::from(format!(
+            "  Description: {}",
+            if form.fields[1].is_empty() {
+                "(none)"
+            } else {
+                &form.fields[1]
+            }
+        )));
+        lines.push(Line::from(format!(
+            "  Model:       {}",
+            if form.fields[2].is_empty() {
+                "(none)"
+            } else {
+                &form.fields[2]
+            }
+        )));
+    } else {
+        for (i, label) in FIELD_LABELS.iter().enumerate() {
+            let prefix = if i == form.active_field { "> " } else { "  " };
+            let style = if i == form.active_field {
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+            lines.push(
+                Line::from(format!("{}{}: {}", prefix, label, form.fields[i])).style(style),
+            );
+        }
+    }
+
+    if let Some(err) = &form.error {
+        lines.push(Line::from(""));
+        lines.push(Line::from(err.clone()).style(Style::default().fg(Color::Red)));
+    }
+
+    lines
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,5 +212,35 @@ mod tests {
             mask_value("ANTHROPIC_BASE_URL", "https://api.example.com"),
             "https://api.example.com"
         );
+    }
+
+    #[test]
+    fn ui_renders_add_form() {
+        let mut form = FormState::new();
+        form.fields[0] = "my-profile".into();
+        form.fields[1] = "A description".into();
+        form.active_field = 0;
+
+        let lines = build_form_lines(&form);
+        // Should have 3 lines (one per field)
+        assert_eq!(lines.len(), 3);
+
+        // Active field should have "> " prefix
+        let first = lines[0].to_string();
+        assert!(first.starts_with("> "), "active field should have '> ' prefix, got: {first}");
+        assert!(first.contains("my-profile"));
+
+        // Non-active fields should have "  " prefix
+        let second = lines[1].to_string();
+        assert!(second.starts_with("  "), "inactive field should have '  ' prefix");
+        assert!(second.contains("A description"));
+    }
+
+    #[test]
+    fn ui_footer_shows_add_hint() {
+        // Verify the normal footer text contains [a] Add
+        let normal_footer =
+            " [↑↓/jk] Navigate  [Enter] Launch  [a] Add  [e] Edit config  [q/Ctrl-C] Quit";
+        assert!(normal_footer.contains("[a] Add"));
     }
 }
