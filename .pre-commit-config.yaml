@@ -1,0 +1,39 @@
+# Pre-commit hooks for cct (Rust project)
+# Install: pre-commit install
+# Run all: pre-commit run --all-files
+repos:
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt --check
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: cargo clippy -- -D warnings
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+      - id: cargo-test
+        name: cargo test
+        entry: cargo test
+        language: system
+        types: [rust]
+        pass_filenames: false
+        stages: [push]
+
+      - id: trailing-whitespace
+        name: trailing whitespace
+        entry: sed -i 's/[[:space:]]*$//'
+        language: system
+        types: [text]
+
+      - id: end-of-file-fixer
+        name: end of file fixer
+        entry: bash -c 'rc=0; for f in "$@"; do if [ -s "$f" ] && [ -n "$(tail -c1 "$f")" ]; then echo >> "$f"; rc=1; fi; done; exit $rc'
+        language: system
+        types: [text]
