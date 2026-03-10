@@ -137,7 +137,8 @@ main() {
     log "cct ${VERSION} installed successfully!"
 }
 
-# Only run main when executed directly, not when sourced
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+# Only run main when executed directly, not when sourced.
+# When piped via curl|bash, BASH_SOURCE is empty — treat that as direct execution.
+if [[ -z "${BASH_SOURCE[0]:-}" ]] || [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     main
 fi
