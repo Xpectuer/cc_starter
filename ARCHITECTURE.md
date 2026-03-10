@@ -51,6 +51,11 @@ Each module has no circular dependency; `launch` and `ui` both depend on `config
 ```
 src/main.rs (entry point)
   → config::ensure_default_config()   # create ~/.config/cc-tui/profiles.toml if absent
+  → launch::check_claude_installed()  # `which claude` — false if missing
+      → [if missing] launch::prompt_install()
+          → prompt "Install now? [Y/n]"
+          → [Y] run `curl -fsSL https://claude.ai/install.sh | bash`
+          → re-check PATH + ~/.local/bin fallback → exit 1 on unresolvable failure
   → config::load_profiles()           # parse TOML → Vec<Profile>
   → crossterm: enable_raw_mode + EnterAlternateScreen
   → App::new(profiles)                # initialize cursor at index 0, mode = Normal
@@ -97,6 +102,19 @@ cct add
       → config::append_profile(&NewProfile { ... })
 ```
 
+### Toggle skip_permissions (key `s`)
+```
+User presses [s] (mode = Normal, profiles non-empty)
+  → compute new_val = !profile.skip_permissions.unwrap_or(false)
+  → config::toggle_skip_permissions(&profile.name, new_val)
+      → parse TOML with toml_edit::DocumentMut (preserves comments)
+      → set entry["skip_permissions"] = new_val
+      → write file
+  → [Ok] app.profiles[selected].skip_permissions = Some(new_val)
+      → UI re-renders: row turns red (true) or normal (false)
+  → [Err] eprintln warning; app state unchanged
+```
+
 ### Hot-reload Config (key `e`)
 ```
 User presses [e]
@@ -113,6 +131,7 @@ User presses [e]
 |--------------|--------|
 | `~/.config/cc-tui/profiles.toml` (default) | Main profile store; location overridable via `CCT_CONFIG` env var |
 | `CCT_CONFIG` env var | Override config file path (used by integration tests) |
+| `CCT_CLAUDE_BIN` env var | Override binary name used by `check_claude_installed` (used by unit tests to substitute `"true"` or a nonexistent binary) |
 | `$EDITOR` env var | Editor opened on `e` key; falls back to `vi` |
 | `profiles[].model` | Adds `--model <value>` to `claude` invocation |
 | `profiles[].skip_permissions = true` | Adds `--dangerously-skip-permissions` to `claude` invocation |
@@ -149,9 +168,10 @@ graph TB
 
 | Suite | Location | Description |
 |-------|----------|-------------|
-| Unit tests | `src/config.rs`, `src/ui.rs`, `src/launch.rs` (inline `#[cfg(test)]`) | Config parsing, arg building, masking |
+| Unit tests | `src/config.rs`, `src/ui.rs`, `src/launch.rs` (inline `#[cfg(test)]`) | Config parsing, arg building, masking, toggle, install check |
 | Integration (mock) | `tests/integration.rs` | Uses a fake `claude` shell script at `tests/helpers/claude` |
 | Integration (live) | `tests/live.rs` | Requires `CCT_LIVE_TESTS=1` and real `claude` binary |
+| Shell (BATS) | `tests/install.bats` | Tests `install.sh` functions in isolation using `export -f` stubbing |
 
 ## Key Design Decisions
 
@@ -161,5 +181,9 @@ graph TB
 - **No shared mutable state**: Each module is self-contained; `App` owns `Vec<Profile>` and is the single source of truth for cursor position and UI mode.
 - **Auto-env-var generation on add**: When `base_url`, `api_key`, or `model` are provided in the add flow, `config::append_profile` generates a complete `[profiles.env]` block covering all Anthropic env var names needed for third-party endpoints, avoiding manual configuration errors.
 - **Dual add surface (CLI + TUI)**: `cct add` (CLI) and `a` key (TUI) both funnel through `config::append_profile`, keeping the TOML serialization logic in one place.
+- **Autoinstall on startup**: `main` calls `launch::check_claude_installed()` before entering the TUI. If `claude` is absent, `prompt_install()` offers to run `curl -fsSL https://claude.ai/install.sh | bash` interactively. This must happen before raw mode is enabled.
+- **`toml_edit` for surgical writes**: `config::toggle_skip_permissions` uses `toml_edit::DocumentMut` rather than re-serializing the entire config, so user comments and key ordering are preserved on every toggle.
+- **`skip_permissions` red visual indicator**: Profile list rows are rendered in `Color::Red` when `skip_permissions = true`, providing an immediate danger signal in the TUI without requiring the user to open the detail panel.
+- **`install.sh` curl|bash installer**: A standalone Bash script at the repo root downloads the latest GitHub Release tarball, verifies it with `tar -tzf`, retries up to 3 times on download failure, and installs to `~/.local/bin`. Does not require root.
 
 <!-- END:architecture -->

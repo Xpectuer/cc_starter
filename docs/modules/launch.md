@@ -34,6 +34,25 @@ generated_by: mci-phase-2
   - **Never returns on success** — the process image is replaced.
   - Returns: `anyhow::Error` only when `exec` itself fails (e.g., `claude` binary not found on `$PATH`).
 
+- `pub fn check_claude_installed() -> bool`
+  - Runs `which <bin>` (or the value of `CCT_CLAUDE_BIN` env var when set) to test whether the
+    target binary is available in `$PATH`.
+  - Returns `true` if `which` exits with status 0; `false` on non-zero exit or any error.
+  - The `CCT_CLAUDE_BIN` override is used exclusively in unit tests (substituting `"true"` or
+    `"nonexistent-binary-xyz-12345"`). Production code reads `"claude"`.
+  - Side effects: spawns a `which` child process; stdout and stderr are suppressed.
+
+- `pub fn prompt_install() -> Result<()>`
+  - Must be called **before** `enable_raw_mode` / `EnterAlternateScreen` — it reads from stdin
+    using standard cooked-mode I/O.
+  - Prints `"Claude CLI not found in PATH."` and prompts `"Install now? [Y/n]"`.
+  - If the user answers `"n"` or `"no"`: prints manual install instructions and calls
+    `std::process::exit(0)`.
+  - Otherwise: runs `curl -fsSL https://claude.ai/install.sh | bash` via `Command::new("bash")`.
+  - On installer success: re-checks via `check_claude_installed()`, then checks
+    `~/.local/bin/claude` as a fallback (installer may not update PATH mid-session).
+  - Returns `Err` if the installer exits non-zero or if `claude` is still not found after install.
+
 - `pub fn open_editor(path: &Path) -> Result<()>`
   - Reads `$EDITOR`; falls back to `"vi"` if the variable is unset or empty.
   - Spawns the editor as a child process, blocking until it exits.
@@ -56,6 +75,7 @@ None — all public surface is functions. The module consumes `crate::config::Pr
 - **Imports from `std::env`** → `env::set_var` (inject profile env vars) and `env::var` (read `$EDITOR`).
 - **Imports from `crossterm`** → `terminal::disable_raw_mode` and `execute!(stdout, LeaveAlternateScreen)` for terminal cleanup in `restore_terminal`.
 - **Imports from `anyhow`** → `Context` trait (adds context to `open_editor` errors) and `Result` alias. `exec_claude` returns a bare `anyhow::Error` rather than `Result<_>` because it has no success path.
+- **Imports from `dirs`** → `dirs::home_dir()` in `prompt_install` to check `~/.local/bin/claude` as an install fallback when `which` still fails after the installer runs.
 - **Does NOT depend on**: `app`, `ui`, or any async runtime. The module is synchronous and has no shared mutable state.
 
 <!-- END:dependency_graph -->
@@ -169,8 +189,8 @@ let args = launch::build_args(&profile);
 
 ## Quality Gate Checklist
 
-- [x] **Interface**: 4 public functions documented with signatures, return types, and semantics
-- [x] **Dependencies**: All internal and external module dependencies listed with reasoning
+- [x] **Interface**: 6 public functions documented with signatures, return types, and semantics (added `check_claude_installed`, `prompt_install`)
+- [x] **Dependencies**: All internal and external module dependencies listed with reasoning (added `dirs`)
 - [x] **State Management**: Clearly distinguishes pure functions from process-mutating functions; lifecycle of env mutation explained
 - [x] **Edge Cases**: Editor fallback, error-type quirk, argument ordering contract, Unix-only constraint, env set_var threading note
 - [x] **Usage Example**: Concrete Rust pseudocode mirroring actual `main.rs` call patterns for both Enter (exec) and 'e' (editor) flows
@@ -179,4 +199,4 @@ let args = launch::build_args(&profile);
 ---
 
 **Template Version**: 2.0
-**Last Updated**: 2026-03-03
+**Last Updated**: 2026-03-10

@@ -3,8 +3,8 @@ doc_type: module
 module_name: "config"
 module_path: "src/config.rs"
 generated_by: mci-phase-2
-revision: 2
-updated: 2026-03-03
+revision: 3
+updated: 2026-03-10
 ---
 
 # config Module Documentation
@@ -68,6 +68,17 @@ updated: 2026-03-03
   - Reads then appends (never rewrites) the config file to preserve comments and ordering of existing profiles.
   - Uses the private `non_empty()` helper to skip blank strings.
 
+- `toggle_skip_permissions(profile_name: &str, new_value: bool) -> Result<()>`
+  - Surgically updates the `skip_permissions` field of the named profile in the config file.
+  - Uses `toml_edit::DocumentMut` to parse and rewrite the file while preserving all comments,
+    whitespace, and key ordering for other profiles.
+  - Finds the profile by matching `name` exactly (case-sensitive) against the `[[profiles]]` array.
+  - Sets `entry["skip_permissions"] = toml_edit::value(new_value)` — inserts the key if absent,
+    overwrites it if already present.
+  - Returns `Err` if the profile name is not found or if the file cannot be read/written.
+  - Callers in `main.rs` reflect the change optimistically in `app.profiles[app.selected]`
+    immediately after a successful return, without calling `load_profiles()` again.
+
 ### Private Constants
 
 - `DEFAULT_CONFIG: &str` — A `const` string literal containing a commented example `profiles.toml` with one minimal `[[profiles]]` block. Written to disk only when no config file exists. Verified by the `default_config_is_valid_toml` unit test to be parseable TOML.
@@ -84,6 +95,9 @@ updated: 2026-03-03
 
 - **`serde`** (feature `derive`) — Provides the `Deserialize` derive macro applied to `Profile` and `Config`. No `Serialize` is used; config is read-only from Rust's perspective.
 - **`toml`** — `toml::from_str::<Config>(&content)` performs the TOML-to-struct deserialization.
+- **`toml_edit`** — `toml_edit::DocumentMut` is used by `toggle_skip_permissions` for surgical
+  in-place edits that preserve comments and formatting. Only this function uses `toml_edit`;
+  read paths continue to use the simpler `toml` crate.
 - **`anyhow`** — `anyhow::Result` and the `.with_context(|| ...)` combinator are used for all error propagation, giving callers human-readable error chains.
 - **`dirs`** — `dirs::config_dir()` maps to the OS-appropriate XDG config directory (`~/.config` on Linux, `~/Library/Application Support` on macOS). Falls back to `PathBuf::from("~/.config")` if `dirs` returns `None`.
 

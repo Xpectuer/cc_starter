@@ -9,11 +9,22 @@ A terminal UI for managing and launching [Claude Code](https://claude.ai/code) w
 - **Inline profile creation** — press `a` in the TUI to add a new profile via a 5-field form, or run `cct add` from the CLI
 - **Auto-populated env vars** — providing `base_url`, `api_key`, or `model` in the add flow generates a `[profiles.env]` section with all relevant Anthropic env vars pre-filled
 - **Sensitive value masking** — env keys containing `TOKEN`, `KEY`, or `SECRET` are redacted in the UI
+- **skip_permissions toggle** — press `s` to toggle `--dangerously-skip-permissions` on the selected profile; the profile row turns red as a visual warning; the change is persisted immediately to `profiles.toml`
+- **Autoinstall** — if `claude` is not found in PATH on startup, `cct` offers to install it via `curl -fsSL https://claude.ai/install.sh | bash`
 - **Hot-reload** — press `e` to open `$EDITOR`, config is re-parsed on return
 - **Zero overhead** — `exec()` replaces the process; no parent lingers
 
 ## Install
 
+**Option A — curl|bash (recommended)**:
+```bash
+curl -fsSL https://raw.githubusercontent.com/zhengjy/cc_starter/master/install.sh | bash
+```
+
+Installs the latest release binary to `~/.local/bin/cct`. Requires `curl` and `tar`.
+Supported platforms: Linux x86_64, macOS arm64, macOS x86_64.
+
+**Option B — cargo**:
 ```bash
 cargo install --path .
 ```
@@ -63,6 +74,7 @@ CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
 | `j` / `Down` | Next profile |
 | `k` / `Up` | Previous profile |
 | `Enter` | Launch selected profile |
+| `s` | Toggle `skip_permissions` on selected profile (row turns red when enabled) |
 | `a` | Open inline add-profile form |
 | `e` | Edit config in `$EDITOR` |
 | `q` / `Ctrl-C` | Quit |
@@ -87,6 +99,7 @@ cargo test                     # all tests
 cargo clippy                   # lint
 cargo test --test integration  # E2E (mock)
 CCT_LIVE_TESTS=1 cargo test --test live  # E2E (live, needs claude binary)
+bats tests/install.bats        # shell tests for install.sh (requires bats-core)
 ```
 
 ## Architecture

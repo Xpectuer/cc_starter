@@ -21,6 +21,9 @@ cargo test --test integration
 
 # E2E (live — requires `claude` binary installed)
 CCT_LIVE_TESTS=1 cargo test --test live
+
+# Shell tests for install.sh (requires bats-core)
+bats tests/install.bats
 ```
 
 ## Architecture
@@ -29,19 +32,21 @@ The app is five focused modules with no shared mutable state:
 
 | Module | File | Responsibility |
 |--------|------|----------------|
-| `config` | `src/config.rs` | Deserialize `profiles.toml` via serde/toml; write default config on first run; append new profiles with auto-generated env vars |
+| `config` | `src/config.rs` | Deserialize `profiles.toml` via serde/toml; write default config on first run; append new profiles with auto-generated env vars; toggle skip_permissions via toml_edit |
 | `app` | `src/app.rs` | Cursor state (`selected` index), navigation (`next`/`prev`), `AppMode` (Normal/AddForm), 5-field `FormState` |
-| `ui` | `src/ui.rs` | ratatui rendering — 35/65 split list+detail panel + footer; inline add-form; masks sensitive env vars |
-| `launch` | `src/launch.rs` | Build `claude` CLI args from a profile; `exec()` the process (Unix replace); open `$EDITOR` |
+| `ui` | `src/ui.rs` | ratatui rendering — 35/65 split list+detail panel + footer; inline add-form; masks sensitive env vars; red row style for skip_permissions profiles |
+| `launch` | `src/launch.rs` | Build `claude` CLI args from a profile; `exec()` the process (Unix replace); open `$EDITOR`; check/install claude binary |
 | `cli` | `src/cli.rs` | `cct add` interactive CLI flow — 5 prompts, masked summary, duplicate guard |
 
-**Data flow:** `main` loads profiles → creates `App` → draw loop → on Enter calls `launch::exec_claude` which injects env vars and exec-replaces via `std::os::unix::process::CommandExt::exec`.
+**Data flow:** `main` checks claude is installed → loads profiles → creates `App` → draw loop → on Enter calls `launch::exec_claude` which injects env vars and exec-replaces via `std::os::unix::process::CommandExt::exec`.
 
 **Key design choices:**
 - `exec` (not `spawn`) is used so `claude` inherits the terminal cleanly; there is no return path on success.
 - `ui::mask_value` redacts any env key containing `TOKEN`, `KEY`, or `SECRET`.
 - Config hot-reload on `e`: editor opens, then profiles are re-parsed in-place without restart.
 - Profile add (CLI `cct add` or TUI `a` key) auto-generates a `[profiles.env]` block when `base_url`, `api_key`, or `model` are provided.
+- `s` key toggles `skip_permissions` on the selected profile; persisted via `toml_edit` to preserve comments.
+- On startup, if `claude` is missing, `prompt_install()` offers to run the official installer before entering raw mode.
 
 ## Config File Format
 
@@ -90,10 +95,14 @@ CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
 Detailed module docs are in `docs/modules/`:
 
 - [Module Index](docs/modules/index.md) — cross-module dependency graph and global interface index
-- [config](docs/modules/config.md) — TOML deserialization, config path, default bootstrap
+- [config](docs/modules/config.md) — TOML deserialization, config path, default bootstrap, toggle_skip_permissions
 - [app](docs/modules/app.md) — cursor state and circular navigation
 - [ui](docs/modules/ui.md) — ratatui rendering and sensitive-value masking
-- [launch](docs/modules/launch.md) — arg building, exec-replace, editor open
+- [launch](docs/modules/launch.md) — arg building, exec-replace, editor open, autoinstall check
+
+Other docs:
+- [install-script reference](docs/references/install-script.md) — curl|bash installer functions and test coverage
+- [BATS stubbing lesson](docs/lessons/bats-shell-function-stubbing.md) — export -f pattern for shell test isolation
 
 See also: [ARCHITECTURE.md](ARCHITECTURE.md) for the system-level overview.
 <!-- END:module-docs -->
