@@ -38,6 +38,69 @@ pub fn exec_claude(profile: &Profile) -> anyhow::Error {
     anyhow::anyhow!("exec claude: {err}")
 }
 
+/// Check if `claude` (or override via CCT_CLAUDE_BIN) is available in PATH.
+pub fn check_claude_installed() -> bool {
+    let bin = std::env::var("CCT_CLAUDE_BIN").unwrap_or_else(|_| "claude".to_string());
+    Command::new("which")
+        .arg(&bin)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Prompt user to install claude via the official installer script.
+/// Must be called BEFORE entering raw mode / alternate screen.
+/// Returns Ok(()) on successful install, Err on failure or user decline.
+pub fn prompt_install() -> Result<()> {
+    use std::io::{BufRead, Write};
+
+    println!("Claude CLI not found in PATH.");
+    print!("Install now? [Y/n] ");
+    io::stdout().flush()?;
+
+    let mut input = String::new();
+    io::stdin().lock().read_line(&mut input)?;
+    let trimmed = input.trim().to_lowercase();
+
+    if trimmed == "n" || trimmed == "no" {
+        println!("\nTo install manually, run:");
+        println!("  curl -fsSL https://claude.ai/install.sh | bash");
+        std::process::exit(0);
+    }
+
+    println!("\nInstalling Claude CLI...\n");
+    let status = Command::new("bash")
+        .arg("-c")
+        .arg("curl -fsSL https://claude.ai/install.sh | bash")
+        .status()
+        .context("failed to run installer")?;
+
+    if !status.success() {
+        anyhow::bail!(
+            "Installation failed (exit code: {:?}). Install manually:\n  curl -fsSL https://claude.ai/install.sh | bash",
+            status.code()
+        );
+    }
+
+    // Re-check: try PATH first, then ~/.local/bin/claude as fallback
+    if check_claude_installed() {
+        println!("\nClaude CLI installed successfully.");
+        return Ok(());
+    }
+
+    let home = dirs::home_dir().unwrap_or_default();
+    let fallback = home.join(".local/bin/claude");
+    if fallback.exists() {
+        println!("\nClaude CLI installed at {}.", fallback.display());
+        println!("Note: You may need to add ~/.local/bin to your PATH.");
+        return Ok(());
+    }
+
+    anyhow::bail!("Installation completed but `claude` not found in PATH.\nAdd ~/.local/bin to your PATH and restart your shell.")
+}
+
 /// Suspend TUI, open $EDITOR (or vi) on path, block until editor exits.
 pub fn open_editor(path: &Path) -> Result<()> {
     let editor = env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
@@ -62,6 +125,21 @@ mod tests {
             skip_permissions: skip,
             extra_args: extra.map(|v| v.into_iter().map(Into::into).collect()),
         }
+    }
+
+    #[test]
+    fn check_claude_installed_found() {
+        // "true" is always in PATH on Unix
+        std::env::set_var("CCT_CLAUDE_BIN", "true");
+        assert!(super::check_claude_installed());
+        std::env::remove_var("CCT_CLAUDE_BIN");
+    }
+
+    #[test]
+    fn check_claude_installed_not_found() {
+        std::env::set_var("CCT_CLAUDE_BIN", "nonexistent-binary-xyz-12345");
+        assert!(!super::check_claude_installed());
+        std::env::remove_var("CCT_CLAUDE_BIN");
     }
 
     #[test]

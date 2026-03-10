@@ -27,6 +27,10 @@ enum Commands {
 fn main() -> Result<()> {
     config::ensure_default_config()?;
 
+    if !launch::check_claude_installed() {
+        launch::prompt_install()?;
+    }
+
     let args = Cli::parse();
     match args.command {
         Some(Commands::Add) => cli::run_add(),
@@ -76,6 +80,19 @@ fn run_tui() -> Result<()> {
                                 }
                             }
                             Err(e) => eprintln!("Warning: profile reload failed: {e:#}"),
+                        }
+                    }
+                    (KeyCode::Char('s'), _) if !app.profiles.is_empty() => {
+                        let profile = &mut app.profiles[app.selected];
+                        let old_val = profile.skip_permissions.unwrap_or(false);
+                        let new_val = !old_val;
+                        match config::toggle_skip_permissions(&profile.name, new_val) {
+                            Ok(()) => {
+                                profile.skip_permissions = Some(new_val);
+                            }
+                            Err(e) => {
+                                eprintln!("Warning: toggle failed: {e:#}");
+                            }
                         }
                     }
                     (KeyCode::Char('a'), _) => {

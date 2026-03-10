@@ -120,6 +120,30 @@ pub fn append_profile(profile: &NewProfile) -> Result<()> {
     Ok(())
 }
 
+/// Toggle `skip_permissions` for a named profile in the config file.
+/// Uses toml_edit for surgical edits that preserve comments and formatting.
+pub fn toggle_skip_permissions(profile_name: &str, new_value: bool) -> Result<()> {
+    let path = config_path();
+    let content = fs::read_to_string(&path).with_context(|| format!("read config {path:?}"))?;
+    let mut doc = content
+        .parse::<toml_edit::DocumentMut>()
+        .with_context(|| format!("parse TOML in {path:?}"))?;
+
+    let profiles = doc
+        .get_mut("profiles")
+        .and_then(|v| v.as_array_of_tables_mut())
+        .with_context(|| "no [[profiles]] array in config")?;
+
+    let entry = profiles
+        .iter_mut()
+        .find(|t| t.get("name").and_then(|v| v.as_str()) == Some(profile_name))
+        .with_context(|| format!("profile {profile_name:?} not found in config"))?;
+
+    entry["skip_permissions"] = toml_edit::value(new_value);
+    fs::write(&path, doc.to_string()).with_context(|| format!("write config {path:?}"))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -422,6 +446,62 @@ ANTHROPIC_AUTH_TOKEN = "sk-secret"
             p.env.is_none(),
             "env section should be None for minimal profile"
         );
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn toggle_skip_permissions_insert() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(&path, "# comment\n[[profiles]]\nname = \"test\"\n").unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        toggle_skip_permissions("test", true).unwrap();
+        let profiles = load_profiles().unwrap();
+        assert_eq!(profiles[0].skip_permissions, Some(true));
+
+        // Verify comment is preserved
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("# comment"), "comment should be preserved");
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn toggle_skip_permissions_flip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(
+            &path,
+            "[[profiles]]\nname = \"test\"\nskip_permissions = true\n",
+        )
+        .unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        toggle_skip_permissions("test", false).unwrap();
+        let profiles = load_profiles().unwrap();
+        assert_eq!(profiles[0].skip_permissions, Some(false));
+
+        toggle_skip_permissions("test", true).unwrap();
+        let profiles = load_profiles().unwrap();
+        assert_eq!(profiles[0].skip_permissions, Some(true));
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn toggle_skip_permissions_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(&path, "[[profiles]]\nname = \"other\"\n").unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        let result = toggle_skip_permissions("missing", true);
+        assert!(result.is_err());
 
         std::env::remove_var("CCT_CONFIG");
     }

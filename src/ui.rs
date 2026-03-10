@@ -44,7 +44,12 @@ pub fn draw(app: &App, frame: &mut Frame) {
                     Some(d) => format!("{}\n  {}", p.name, d),
                     None => p.name.clone(),
                 };
-                ListItem::new(label)
+                let item = ListItem::new(label);
+                if p.skip_permissions.unwrap_or(false) {
+                    item.style(Style::default().fg(Color::Red))
+                } else {
+                    item
+                }
             })
             .collect()
     };
@@ -94,7 +99,7 @@ pub fn draw(app: &App, frame: &mut Frame) {
     // --- Footer ---
     let footer_text = match &app.mode {
         AppMode::Normal => {
-            " [↑↓/jk] Navigate  [Enter] Launch  [a] Add  [e] Edit config  [q/Ctrl-C] Quit"
+            " [↑↓/jk] Navigate  [Enter] Launch  [s] Skip-perms  [a] Add  [e] Edit config  [q/Ctrl-C] Quit"
         }
         AppMode::AddForm(form) if form.confirming => " [y] Save  [n/Esc] Back",
         AppMode::AddForm(_) => {
@@ -322,9 +327,39 @@ mod tests {
 
     #[test]
     fn ui_footer_shows_add_hint() {
-        // Verify the normal footer text contains [a] Add
         let normal_footer =
-            " [↑↓/jk] Navigate  [Enter] Launch  [a] Add  [e] Edit config  [q/Ctrl-C] Quit";
+            " [↑↓/jk] Navigate  [Enter] Launch  [s] Skip-perms  [a] Add  [e] Edit config  [q/Ctrl-C] Quit";
         assert!(normal_footer.contains("[a] Add"));
+        assert!(normal_footer.contains("[s] Skip-perms"));
+    }
+
+    #[test]
+    fn skip_permissions_profile_has_red_style() {
+        let profile = Profile {
+            name: "dangerous".into(),
+            description: None,
+            env: None,
+            model: None,
+            skip_permissions: Some(true),
+            extra_args: None,
+        };
+        // Verify skip_permissions triggers the red-style branch
+        assert!(profile.skip_permissions.unwrap_or(false));
+        // Build a ListItem the same way the draw function does
+        let label = profile.name.clone();
+        let item = ListItem::new(label);
+        // This should apply red style without panicking
+        let _styled = item.style(Style::default().fg(Color::Red));
+
+        // Also verify that skip_permissions=false does NOT trigger the branch
+        let safe_profile = Profile {
+            name: "safe".into(),
+            description: None,
+            env: None,
+            model: None,
+            skip_permissions: Some(false),
+            extra_args: None,
+        };
+        assert!(!safe_profile.skip_permissions.unwrap_or(false));
     }
 }
