@@ -41,14 +41,17 @@ detect() {
 
 # --- fetch latest release ---
 
-REPO="zhengjy/cc_starter"
+REPO="Xpectuer/cc_starter"
 
 fetch_latest() {
     local api_url="https://api.github.com/repos/${REPO}/releases/latest"
     local response
 
+    local http_code
+    http_code="$(curl -sL -o /dev/null -w '%{http_code}' "${api_url}" 2>/dev/null)" || true
+
     response="$(curl -fsSL "${api_url}" 2>/dev/null)" \
-        || err "Failed to fetch latest release from GitHub API"
+        || err "Failed to fetch latest release from GitHub API (HTTP ${http_code}). Check that ${REPO} has published releases at ${api_url}"
 
     VERSION="$(echo "${response}" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
 
