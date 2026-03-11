@@ -18,7 +18,7 @@ A terminal UI for managing and launching [Claude Code](https://claude.ai/code) w
 
 **Option A — curl|bash (recommended)**:
 ```bash
-https://raw.githubusercontent.com/Xpectuer/cc_starter/refs/heads/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Xpectuer/cc_starter/refs/heads/master/install.sh | bash
 ```
 
 Installs the latest release binary to `~/.local/bin/cct`. Requires `curl` and `tar`.
