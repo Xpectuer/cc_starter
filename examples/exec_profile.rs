@@ -7,7 +7,7 @@ fn main() {
     let profiles = config::load_profiles().expect("load profiles");
     let profile = profiles.into_iter().next().expect("at least one profile");
     launch::restore_terminal();
-    let err = launch::exec_claude(&profile);
+    let err = launch::exec_claude(&profile, false);
     eprintln!("exec_profile: {err:#}");
     std::process::exit(1);
 }

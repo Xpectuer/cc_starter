@@ -62,7 +62,13 @@ fn run_tui() -> Result<()> {
                     (KeyCode::Up, _) | (KeyCode::Char('k'), _) => app.prev(),
                     (KeyCode::Enter, _) if !app.profiles.is_empty() => {
                         launch::restore_terminal();
-                        let err = launch::exec_claude(&app.profiles[app.selected]);
+                        let err = launch::exec_claude(&app.profiles[app.selected], false);
+                        eprintln!("Error: {err:#}");
+                        std::process::exit(1);
+                    }
+                    (KeyCode::Char('c'), _) if !app.profiles.is_empty() => {
+                        launch::restore_terminal();
+                        let err = launch::exec_claude(&app.profiles[app.selected], true);
                         eprintln!("Error: {err:#}");
                         std::process::exit(1);
                     }

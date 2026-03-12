@@ -99,7 +99,7 @@ pub fn draw(app: &App, frame: &mut Frame) {
     // --- Footer ---
     let footer_text = match &app.mode {
         AppMode::Normal => {
-            " [↑↓/jk] Navigate  [Enter] Launch  [s] Skip-perms  [a] Add  [e] Edit config  [q/Ctrl-C] Quit"
+            " [↑↓/jk] Navigate  [Enter] Launch  [c] Resume  [s] Skip-perms  [a] Add  [e] Edit config  [q/Ctrl-C] Quit"
         }
         AppMode::AddForm(form) if form.confirming => " [y] Save  [n/Esc] Back",
         AppMode::AddForm(_) => {
@@ -328,9 +328,10 @@ mod tests {
     #[test]
     fn ui_footer_shows_add_hint() {
         let normal_footer =
-            " [↑↓/jk] Navigate  [Enter] Launch  [s] Skip-perms  [a] Add  [e] Edit config  [q/Ctrl-C] Quit";
+            " [↑↓/jk] Navigate  [Enter] Launch  [c] Resume  [s] Skip-perms  [a] Add  [e] Edit config  [q/Ctrl-C] Quit";
         assert!(normal_footer.contains("[a] Add"));
         assert!(normal_footer.contains("[s] Skip-perms"));
+        assert!(normal_footer.contains("[c] Resume"));
     }
 
     #[test]

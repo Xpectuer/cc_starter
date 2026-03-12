@@ -1,7 +1,7 @@
 ---
 title: "Intake Session Log"
 doc_type: proc
-status: ready
+status: activated
 brief: "Q&A transcript for cct --continue one-shot launch key"
 confidence: verified
 created: 2026-03-12
