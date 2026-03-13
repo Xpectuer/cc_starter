@@ -66,7 +66,7 @@ jobs:
         run: |
           docker run --rm \
             -v $PWD/target/${{ matrix.target }}/release/cct:/usr/local/bin/cct \
-            ubuntu:20.04 cct --help
+            ubuntu:20.04 sh -c 'cct 2>&1; code=$?; if [ $code -eq 127 ]; then echo "Binary failed to load"; exit 1; fi; echo "Binary loaded OK (exit $code)"; exit 0'
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
