@@ -77,7 +77,7 @@ fn build_args_ordering() {
         skip_permissions: Some(true),
         extra_args: Some(vec!["--verbose".into(), "--debug".into()]),
     };
-    let args = launch::build_args(&profile);
+    let args = launch::build_args(&profile, false);
     assert_eq!(
         args,
         vec![
@@ -102,7 +102,7 @@ fn build_args_empty_profile() {
         skip_permissions: None,
         extra_args: None,
     };
-    let args = launch::build_args(&profile);
+    let args = launch::build_args(&profile, false);
     assert!(args.is_empty());
 }
 

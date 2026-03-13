@@ -10,8 +10,11 @@ pub fn restore_terminal() {
 }
 
 /// Build the CLI argument list for `claude` from a profile. Pure — no side effects.
-pub fn build_args(profile: &Profile) -> Vec<String> {
+pub fn build_args(profile: &Profile, with_continue: bool) -> Vec<String> {
     let mut args = Vec::new();
+    if with_continue {
+        args.push("--continue".to_string());
+    }
     if let Some(model) = &profile.model {
         args.push("--model".to_string());
         args.push(model.clone());
@@ -27,13 +30,13 @@ pub fn build_args(profile: &Profile) -> Vec<String> {
 
 /// Inject profile env vars and exec-replace the current process with `claude`.
 /// Returns only on error (process was not replaced).
-pub fn exec_claude(profile: &Profile) -> anyhow::Error {
+pub fn exec_claude(profile: &Profile, with_continue: bool) -> anyhow::Error {
     if let Some(env_map) = &profile.env {
         for (k, v) in env_map {
             env::set_var(k, v);
         }
     }
-    let args = build_args(profile);
+    let args = build_args(profile, with_continue);
     let err = Command::new("claude").args(&args).exec();
     anyhow::anyhow!("exec claude: {err}")
 }
@@ -144,13 +147,13 @@ mod tests {
 
     #[test]
     fn build_args_empty() {
-        assert!(build_args(&profile(None, None, None)).is_empty());
+        assert!(build_args(&profile(None, None, None), false).is_empty());
     }
 
     #[test]
     fn build_args_model_only() {
         assert_eq!(
-            build_args(&profile(Some("kimi-k1.5"), None, None)),
+            build_args(&profile(Some("kimi-k1.5"), None, None), false),
             vec!["--model", "kimi-k1.5"]
         );
     }
@@ -159,12 +162,41 @@ mod tests {
     fn build_args_full() {
         let p = profile(Some("opus"), Some(true), Some(vec!["--verbose"]));
         assert_eq!(
-            build_args(&p),
+            build_args(&p, false),
             vec![
                 "--model",
                 "opus",
                 "--dangerously-skip-permissions",
                 "--verbose"
+            ]
+        );
+    }
+
+    #[test]
+    fn build_args_with_continue_false() {
+        // Existing behavior preserved when with_continue=false
+        assert!(build_args(&profile(None, None, None), false).is_empty());
+    }
+
+    #[test]
+    fn build_args_continue_only() {
+        assert_eq!(
+            build_args(&profile(None, None, None), true),
+            vec!["--continue"]
+        );
+    }
+
+    #[test]
+    fn build_args_continue_with_flags() {
+        let p = profile(Some("opus"), Some(true), Some(vec!["--verbose"]));
+        assert_eq!(
+            build_args(&p, true),
+            vec![
+                "--continue",
+                "--model",
+                "opus",
+                "--dangerously-skip-permissions",
+                "--verbose",
             ]
         );
     }
