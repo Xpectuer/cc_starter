@@ -57,7 +57,9 @@ jobs:
 
       - name: Verify static linking
         if: contains(matrix.target, 'linux-musl')
-        run: file target/${{ matrix.target }}/release/cct | grep -i "statically linked"
+        run: |
+          file target/${{ matrix.target }}/release/cct
+          file target/${{ matrix.target }}/release/cct | grep -iE "statically linked|static-pie linked"
 
       - name: Smoke test on Ubuntu 20.04
         if: matrix.target == 'x86_64-unknown-linux-musl'
