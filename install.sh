@@ -29,7 +29,7 @@ detect() {
             ;;
         Linux)
             case "${arch}" in
-                x86_64) TARGET="x86_64-unknown-linux-gnu" ;;
+                x86_64) TARGET="x86_64-unknown-linux-musl" ;;
                 *)      err "Unsupported architecture on Linux: ${arch}" ;;
             esac
             ;;
