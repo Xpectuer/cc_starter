@@ -3,13 +3,13 @@ doc_type: module
 module_name: "config"
 module_path: "src/config.rs"
 generated_by: mci-phase-2
-revision: 3
-updated: 2026-03-10
+revision: 4
+updated: 2026-03-15
 ---
 
 # config Module Documentation
 
-> **Purpose**: Deserializes `profiles.toml` into typed Rust structs via `serde`/`toml`, bootstraps a default config file on first run, and resolves the config path from the `CCT_CONFIG` environment variable or XDG config directories.
+> **Purpose**: Deserializes `profiles.toml` into typed Rust structs via `serde`/`toml`, bootstraps a default config file on first run, resolves the config path, validates profile field combinations, and writes new profiles for both Claude and Codex backends.
 > **Path**: `src/config.rs`
 
 ---
@@ -19,21 +19,32 @@ updated: 2026-03-10
 
 ### Exported Types
 
+- `enum Backend` — discriminates the two supported launch backends:
+  - `Claude` (default, via `#[derive(Default)]`) — profiles launched with the `claude` CLI.
+  - `Codex` — profiles launched with the `codex` CLI.
+  - Attributes: `#[serde(rename_all = "lowercase")]` so TOML uses `backend = "claude"` / `"codex"`.
+  - Derives: `Debug`, `Default`, `Deserialize`, `Clone`, `PartialEq`.
+
 - `struct Profile` — Represents one launch profile loaded from TOML. All fields except `name` are optional:
   - `name: String` — Unique display name shown in the TUI list.
   - `description: Option<String>` — Human-readable description shown in the detail panel.
+  - `backend: Backend` — `#[serde(default)]` so existing configs without this field default to `Backend::Claude`.
+  - `base_url: Option<String>` — First-class profile field. For Claude: written as `ANTHROPIC_BASE_URL` in `[profiles.env]`. For Codex: written as `base_url` in the profile block and passed to `generate_codex_config`.
+  - `full_auto: Option<bool>` — Codex-only. When `true`, adds `--full-auto` to the codex invocation.
   - `env: Option<HashMap<String, String>>` — Environment variables injected before exec.
-  - `extra_args: Option<Vec<String>>` — Additional CLI arguments appended verbatim to `claude`.
-  - `skip_permissions: Option<bool>` — When `true`, adds `--dangerously-skip-permissions` to the `claude` invocation.
-  - `model: Option<String>` — When set, adds `--model <value>` to the `claude` invocation.
+  - `extra_args: Option<Vec<String>>` — Additional CLI arguments appended verbatim.
+  - `skip_permissions: Option<bool>` — Claude-only. When `true`, adds `--dangerously-skip-permissions`.
+  - `model: Option<String>` — Passed via `--model` for Claude; via `config.toml` for Codex.
   - Derives: `Debug`, `Deserialize`, `Clone`.
 
 - `struct NewProfile` — Input type for creating a new profile via `append_profile`. All fields except `name` are optional:
   - `name: String` — Required profile name (must be unique, case-insensitive).
-  - `description: Option<String>` — Human-readable description.
-  - `base_url: Option<String>` — When set, written as `ANTHROPIC_BASE_URL` in `[profiles.env]`.
-  - `api_key: Option<String>` — When set, written as `ANTHROPIC_API_KEY` in `[profiles.env]`.
-  - `model: Option<String>` — When set, written as `model = ...` in `[[profiles]]` and as 5 model alias env vars plus `API_TIMEOUT_MS` and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` in `[profiles.env]`.
+  - `description: Option<String>` — Human-readable description (Claude only; ignored for Codex).
+  - `base_url: Option<String>` — For Claude: `ANTHROPIC_BASE_URL` in env. For Codex: written as `base_url =` in the profile block.
+  - `api_key: Option<String>` — For Claude: `ANTHROPIC_API_KEY` in env. For Codex: `OPENAI_API_KEY` in env.
+  - `model: Option<String>` — For Claude: `model =` field + 5 model alias env vars. For Codex: `model =` field only (no env vars).
+  - `backend: Backend` — Which backend this profile targets.
+  - `full_auto: Option<bool>` — Codex-only. Written as `full_auto =` in the profile block.
 
 ### Exported Functions
 
@@ -48,11 +59,17 @@ updated: 2026-03-10
   - If present: no-op (idempotent).
   - Returns `anyhow::Result<()>`; propagates errors with context messages.
 
+- `validate_profiles(profiles: &[Profile]) -> Result<()>`
+  - Called immediately after deserialization inside `load_profiles()`.
+  - Rejects two illegal combinations:
+    - `backend == Codex && skip_permissions == Some(true)` — codex does not have a skip-permissions flag.
+    - `backend == Claude && full_auto == Some(true)` — full_auto is codex-only.
+  - Returns `Err` with a descriptive message naming the offending profile on first violation found.
+
 - `load_profiles() -> Result<Vec<Profile>>`
   - Reads the file at `config_path()` to a `String`.
-  - Parses the full TOML document into the private `Config` struct (which holds `profiles: Vec<Profile>`).
-  - Returns the unwrapped `Vec<Profile>` to callers; the outer `Config` wrapper is not exposed.
-  - Returns `anyhow::Result<Vec<Profile>>`; propagates I/O and parse errors with context messages.
+  - Parses the full TOML document; then calls `validate_profiles` before returning.
+  - Returns `anyhow::Result<Vec<Profile>>`; propagates I/O, parse, and validation errors.
 
 - `profile_name_exists(name: &str) -> Result<bool>`
   - Calls `load_profiles()` and returns `true` if any profile's name matches `name` case-insensitively.
@@ -60,24 +77,16 @@ updated: 2026-03-10
 
 - `append_profile(profile: &NewProfile) -> Result<()>`
   - Appends a new `[[profiles]]` block (and optional `[profiles.env]` block) to the existing config file.
-  - **Env-var generation rules** (when `[profiles.env]` is emitted):
-    - `base_url` present → `ANTHROPIC_BASE_URL = "<value>"`
-    - `api_key` present → `ANTHROPIC_API_KEY = "<value>"`
-    - `model` present → `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL` all set to `<value>`; plus `API_TIMEOUT_MS = "600000"` and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"`.
-    - `[profiles.env]` section is omitted entirely when none of the above fields are non-empty.
-  - Reads then appends (never rewrites) the config file to preserve comments and ordering of existing profiles.
-  - Uses the private `non_empty()` helper to skip blank strings.
+  - **Backend-specific behaviour**:
+    - Claude: `base_url` → `ANTHROPIC_BASE_URL`; `api_key` → `ANTHROPIC_API_KEY`; `model` → `ANTHROPIC_MODEL` + 4 alias vars + `API_TIMEOUT_MS` + `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`.
+    - Codex: `base_url` written as profile-level `base_url =` field (not in env); `full_auto` written as `full_auto =` field; only `OPENAI_API_KEY` goes into `[profiles.env]`.
+    - `backend = "codex"` is written explicitly; `backend = "claude"` is omitted (it is the serde default).
+  - Reads then appends (never rewrites) the config file to preserve comments and ordering.
 
 - `toggle_skip_permissions(profile_name: &str, new_value: bool) -> Result<()>`
-  - Surgically updates the `skip_permissions` field of the named profile in the config file.
-  - Uses `toml_edit::DocumentMut` to parse and rewrite the file while preserving all comments,
-    whitespace, and key ordering for other profiles.
-  - Finds the profile by matching `name` exactly (case-sensitive) against the `[[profiles]]` array.
-  - Sets `entry["skip_permissions"] = toml_edit::value(new_value)` — inserts the key if absent,
-    overwrites it if already present.
-  - Returns `Err` if the profile name is not found or if the file cannot be read/written.
-  - Callers in `main.rs` reflect the change optimistically in `app.profiles[app.selected]`
-    immediately after a successful return, without calling `load_profiles()` again.
+  - Surgically updates the `skip_permissions` field of the named profile using `toml_edit::DocumentMut`.
+  - Preserves all comments, whitespace, and key ordering for other profiles.
+  - Callers in `main.rs` reflect the change optimistically in `app.profiles[app.selected]` after a successful return.
 
 ### Private Constants
 
@@ -247,4 +256,4 @@ fn main() -> anyhow::Result<()> {
 ---
 
 **Template Version**: 2.0
-**Last Updated**: 2026-03-03 (revision 2 — added NewProfile, append_profile, profile_name_exists)
+**Last Updated**: 2026-03-15 (revision 4 — added Backend enum, base_url/full_auto fields, validate_profiles, codex-specific append_profile logic)

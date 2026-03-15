@@ -135,6 +135,8 @@ pub fn run_add_with<R: BufRead, W: Write>(mut reader: R, mut writer: W) -> Resul
         base_url,
         api_key,
         model,
+        backend: config::Backend::Claude,
+        full_auto: None,
     };
     config::append_profile(&profile)?;
     writeln!(writer, "Profile '{}' added.", name)?;
@@ -172,6 +174,30 @@ mod tests {
         assert!(content.contains("[profiles.env]"));
         assert!(content.contains("ANTHROPIC_BASE_URL"));
         assert!(content.contains("ANTHROPIC_MODEL = \"MiniMax-M2.1\""));
+
+        std::env::remove_var("CCT_CONFIG");
+    }
+
+    #[test]
+    #[serial]
+    fn cli_add_sets_claude_backend_and_no_full_auto() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        std::fs::write(&path, "[[profiles]]\nname = \"existing\"\n").unwrap();
+        std::env::set_var("CCT_CONFIG", &path);
+
+        // Input: name, desc, base_url, api_key, model, confirm
+        let input = b"cli-test\nsome desc\n\n\n\ny\n";
+        let mut output: Vec<u8> = Vec::new();
+        run_add_with(&input[..], &mut output).unwrap();
+
+        let profiles = config::load_profiles().unwrap();
+        let p = profiles.iter().find(|p| p.name == "cli-test").unwrap();
+        assert_eq!(p.backend, config::Backend::Claude);
+        assert!(
+            p.full_auto.is_none(),
+            "CLI add for Claude should not set full_auto"
+        );
 
         std::env::remove_var("CCT_CONFIG");
     }

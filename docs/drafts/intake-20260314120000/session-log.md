@@ -1,12 +1,12 @@
 ---
 title: "Intake Session Log"
 doc_type: proc
-status: ready
+status: activated
 brief: "Q&A transcript for codex support in cct"
 confidence: speculative
 created: 2026-03-14
-updated: 2026-03-14
-revision: 1
+updated: 2026-03-15
+revision: 2
 context_ref: "docs/references/context-20260314120000/"
 ---
 
@@ -73,7 +73,41 @@ context_ref: "docs/references/context-20260314120000/"
 **Answer**: E2E + 单元测试
 **Files Read**: None
 
+### Round 9 (resumed session)
+**Category**: Constraints (technical detail)
+**Question**: codex 的启动正确路径是什么？
+**Answer**: 用户提供了完整启动机制：
+1. 设置 `CODEX_HOME` 为 `~/.config/cct-tui/codex/`
+2. 启动命令：`OPENAI_API_KEY="<从profile注入>" CODEX_HOME=~/.config/cct-tui/codex/ codex [--full-auto]`
+3. 在启动前生成 `~/.config/cct-tui/codex/config.toml`：
+   ```toml
+   model_provider = "custom"
+   model = "gpt-5.4"
+   [model_providers.custom]
+   name = "<从profile注入name>"
+   base_url = "<从profile注入url>"
+   ```
+**Files Read**: None (user-provided)
+
+### Round 10
+**Category**: Constraints (technical detail)
+**Question**: 多个 codex profile 使用不同 model/base_url 时，config.toml 如何处理？
+**Answer**: 共用一个 config.toml，启动前重写内容
+**Files Read**: None
+
+### Round 11
+**Category**: Constraints (technical detail)
+**Question**: codex config.toml 是 cct 自动生成还是用户手动维护？
+**Answer**: cct 从 profile 字段自动生成
+**Files Read**: None
+
+### Round 12
+**Category**: Scope (detail)
+**Question**: codex 启动参数是否需要支持 --full-auto 以外的参数？
+**Answer**: 仅 full_auto
+**Files Read**: None
+
 ## Summary
-**Rounds**: 8
-**Stop Reason**: All 5 categories answered with confidence
+**Rounds**: 12
+**Stop Reason**: All categories answered with confidence (resumed session)
 **Gaps**: None

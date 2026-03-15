@@ -3,13 +3,13 @@ doc_type: module
 module_name: "ui"
 module_path: "src/ui.rs"
 generated_by: mci-phase-2
-revision: 2
-updated: 2026-03-03
+revision: 3
+updated: 2026-03-15
 ---
 
 # ui Module Documentation
 
-> **Purpose**: Renders the full terminal UI for `cct` using ratatui — a 35/65 split list and detail panel with a 1-line footer, and redacts sensitive environment variable values before display.
+> **Purpose**: Renders the full terminal UI for `cct` using ratatui — a tab bar for backend switching, a 35/65 split filtered list and detail panel, a 1-line footer, and redacts sensitive environment variable values before display.
 > **Path**: src/ui.rs
 
 ---
@@ -32,27 +32,32 @@ updated: 2026-03-03
   - Also used internally by `build_form_lines` to mask the API Key field in the confirmation summary.
 
 - `pub fn draw(app: &App, frame: &mut Frame)`
-  - The single entry point called each render tick from the `crossterm`/ratatui event loop in `main`.
-  - Accepts a shared reference to the current `App` state and a mutable ratatui `Frame`.
-  - Internally performs three rendering passes in order:
-    1. Profile list (left 35%) — stateful `List` widget with blue highlight and `"> "` symbol.
-    2. Detail panel (right 65%) — dispatched on `app.mode`:
+  - The single entry point called each render tick from the event loop in `main`.
+  - Internally performs four rendering passes in order:
+    1. Tab bar (top 1 line) — `build_tab_bar()` renders `[Claude] [Codex]` tabs with the active backend highlighted.
+    2. Profile list (left 35%) — `app.filtered_indices()` is used; only profiles matching `app.active_backend` are shown. Stateful `List` widget with blue highlight and `"> "` symbol.
+    3. Detail panel (right 65%) — dispatched on `app.mode`:
        - `AppMode::Normal` → `build_detail` for the selected profile.
        - `AppMode::AddForm(form)` → `build_form_lines` for the inline add form.
-    3. Footer (bottom 1 line) — key-binding hint in `DarkGray`; content changes based on `app.mode` and `form.confirming`.
+    4. Footer (bottom 1 line) — key-binding hint in `DarkGray`; content reflects current mode and `form.confirming`. Includes `[Tab/1/2] Backend` hint.
   - Has no return value; all output goes through `frame.render_widget` / `frame.render_stateful_widget`.
 
 ### Private Functions (documented for maintainers)
 
+- `fn build_tab_bar(active_backend: &Backend) -> Paragraph<'static>`
+  - Renders `[Claude] [Codex]` where the active backend is shown in bold/highlighted style.
+  - Integrated into `draw()` at the top of the layout.
+
 - `fn build_detail(profile: &Profile) -> Vec<Line<'static>>`
   - Constructs the detail panel text from a single `Profile`.
-  - Fields rendered in order: description, blank line, model, skip_permissions checkmark (`✓`), extra_args, blank line, `ENV:` section (sorted alphabetically, values masked).
-  - Returns owned `Vec<Line<'static>>` via `.clone()` / `format!()` so the caller does not hold a reference into `profile`.
+  - For Codex profiles: shows `backend`, `base_url`, `model`, `full_auto` fields instead of Claude-specific fields.
+  - Returns owned `Vec<Line<'static>>`.
 
 - `fn build_form_lines(form: &FormState) -> Vec<Line<'static>>`
   - Constructs the add-form panel content from `FormState`.
-  - **Edit view** (`form.confirming == false`): renders one line per field using `FIELD_LABELS`, prefixing the active field with `"> "` (cyan + bold) and inactive fields with `"  "` (default style).
-  - **Confirmation view** (`form.confirming == true`): renders a summary of all 5 fields with the API Key masked via `mask_value("API_KEY", ...)`. Empty optional fields are shown as `"(none)"`.
+  - Uses `field_labels(&form.backend)` from `app` module to get backend-specific labels; this keeps label order and `to_new_profile()` field-index convention in sync.
+  - **Edit view** (`form.confirming == false`): renders one line per field prefixing the active field with `"> "` (cyan + bold).
+  - **Confirmation view** (`form.confirming == true`): renders a summary with the API Key masked via `mask_value`.
   - Appends a red error line if `form.error` is `Some`.
   - Returns owned `Vec<Line<'static>>`.
 <!-- END:interface -->
@@ -62,7 +67,7 @@ updated: 2026-03-03
 <!-- BEGIN:dependency_graph -->
 ## 2. Dependency Graph
 
-- **Imports from `crate::app`** — uses `App`, `AppMode`, `FormState`, and `FIELD_LABELS`. `App` carries all mutable state; `AppMode` drives the detail-panel dispatch; `FormState` is the form data model; `FIELD_LABELS` provides field label text.
+- **Imports from `crate::app`** — uses `App`, `AppMode`, `FormState`, `FIELD_LABELS`, `field_labels`, and `Backend`. `field_labels(&form.backend)` is called dynamically inside `build_form_lines` to select the correct label set per backend.
 - **Imports from `crate::config`** — uses the `Profile` struct (fields: `name`, `description`, `model`, `skip_permissions`, `extra_args`, `env`) to build detail lines; `Profile` is passed by reference through `App`.
 - **Imports from `ratatui`** (external crate, not a project module):
   - `layout::{Constraint, Direction, Layout}` — geometric splitting of the terminal area.
@@ -193,4 +198,4 @@ assert_eq!(display, "https://api.anthropic.com");
 ---
 
 **Template Version**: 2.0
-**Last Updated**: 2026-03-03 (revision 2 — added AppMode dispatch, build_form_lines, updated dependency graph)
+**Last Updated**: 2026-03-15 (revision 3 — added build_tab_bar, backend-filtered profile list, backend-aware build_form_lines using field_labels, updated footer with Tab/1/2 hint)

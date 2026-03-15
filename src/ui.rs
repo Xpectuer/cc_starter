@@ -1,5 +1,5 @@
-use crate::app::{App, AppMode, FormState, FIELD_LABELS};
-use crate::config::Profile;
+use crate::app::{field_labels, App, AppMode, FormState};
+use crate::config::{Backend, Profile};
 use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
@@ -20,6 +20,28 @@ pub fn mask_value<'a>(key: &str, val: &'a str) -> &'a str {
     }
 }
 
+/// Build a tab bar showing `[Claude]` and `[Codex]` with the active tab highlighted.
+pub fn build_tab_bar(active: &Backend) -> Vec<Line<'static>> {
+    let claude_label = "[Claude]";
+    let codex_label = "[Codex]";
+    let active_style = Style::default()
+        .fg(Color::White)
+        .bg(Color::Blue)
+        .add_modifier(Modifier::BOLD);
+    let inactive_style = Style::default().fg(Color::DarkGray);
+
+    let claude_span = ratatui::text::Span::styled(
+        claude_label,
+        if *active == Backend::Claude { active_style } else { inactive_style },
+    );
+    let codex_span = ratatui::text::Span::styled(
+        codex_label,
+        if *active == Backend::Codex { active_style } else { inactive_style },
+    );
+
+    vec![Line::from(vec![claude_span, ratatui::text::Span::raw("  "), codex_span])]
+}
+
 pub fn draw(app: &App, frame: &mut Frame) {
     // Outer: content area + 1-line footer
     let outer = Layout::default()
@@ -33,30 +55,52 @@ pub fn draw(app: &App, frame: &mut Frame) {
         .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
         .split(outer[0]);
 
-    // --- Profile list ---
-    let items: Vec<ListItem> = if app.profiles.is_empty() {
-        vec![ListItem::new("No profiles. Press 'e' to edit config.")]
+    // --- Left panel: tab bar + profile list ---
+    let left_panel = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .split(content[0]);
+
+    // Tab bar
+    let tab_lines = build_tab_bar(&app.active_backend);
+    let tab_bar = Paragraph::new(tab_lines);
+    frame.render_widget(tab_bar, left_panel[0]);
+
+    // --- Profile list (filtered by active_backend) ---
+    let filtered = app.filtered_indices();
+    let items: Vec<ListItem> = if filtered.is_empty() {
+        vec![ListItem::new("No profiles. Press 'a' to add or 'e' to edit config.")]
     } else {
-        app.profiles
+        filtered
             .iter()
-            .map(|p| {
+            .map(|&i| {
+                let p = &app.profiles[i];
                 let label = match &p.description {
                     Some(d) => format!("{}\n  {}", p.name, d),
                     None => p.name.clone(),
                 };
                 let item = ListItem::new(label);
-                if p.skip_permissions.unwrap_or(false) {
-                    item.style(Style::default().fg(Color::Red))
-                } else {
-                    item
+                match p.backend {
+                    Backend::Claude if p.skip_permissions.unwrap_or(false) => {
+                        item.style(Style::default().fg(Color::Red))
+                    }
+                    Backend::Codex if p.full_auto.unwrap_or(false) => {
+                        item.style(Style::default().fg(Color::Yellow))
+                    }
+                    Backend::Codex => {
+                        item.style(Style::default().fg(Color::White))
+                    }
+                    _ => item,
                 }
             })
             .collect()
     };
 
+    // Map app.selected (global index) to position within filtered list
     let mut list_state = ListState::default();
-    if !app.profiles.is_empty() {
-        list_state.select(Some(app.selected));
+    if !filtered.is_empty() {
+        let pos = filtered.iter().position(|&i| i == app.selected).unwrap_or(0);
+        list_state.select(Some(pos));
     }
 
     let profile_list = List::new(items)
@@ -68,7 +112,7 @@ pub fn draw(app: &App, frame: &mut Frame) {
         )
         .highlight_symbol("> ");
 
-    frame.render_stateful_widget(profile_list, content[0], &mut list_state);
+    frame.render_stateful_widget(profile_list, left_panel[1], &mut list_state);
 
     // --- Detail panel ---
     match &app.mode {
@@ -98,9 +142,14 @@ pub fn draw(app: &App, frame: &mut Frame) {
 
     // --- Footer ---
     let footer_text = match &app.mode {
-        AppMode::Normal => {
-            " [↑↓/jk] Navigate  [Enter] Launch  [c] Resume  [s] Skip-perms  [a] Add  [e] Edit config  [q/Ctrl-C] Quit"
-        }
+        AppMode::Normal => match app.active_backend {
+            Backend::Claude => {
+                " [Tab/1/2] Backend  [↑↓/jk] Navigate  [Enter] Launch  [c] Resume  [s] Skip-perms  [a] Add  [e] Edit config  [q] Quit"
+            }
+            Backend::Codex => {
+                " [Tab/1/2] Backend  [↑↓/jk] Navigate  [Enter] Launch  [s] Full-auto  [a] Add  [e] Edit config  [q] Quit"
+            }
+        },
         AppMode::AddForm(form) if form.confirming => " [y] Save  [n/Esc] Back",
         AppMode::AddForm(_) => {
             " [Tab/↓] Next field  [Shift-Tab/↑] Prev  [Enter] Confirm  [Esc] Cancel"
@@ -120,8 +169,22 @@ fn build_detail(profile: &Profile) -> Vec<Line<'static>> {
     if let Some(model) = &profile.model {
         lines.push(Line::from(format!("model: {model}")));
     }
-    if profile.skip_permissions.unwrap_or(false) {
-        lines.push(Line::from("skip_permissions: ✓"));
+    if let Some(url) = &profile.base_url {
+        if !url.is_empty() {
+            lines.push(Line::from(format!("base_url: {url}")));
+        }
+    }
+    match profile.backend {
+        Backend::Claude => {
+            if profile.skip_permissions.unwrap_or(false) {
+                lines.push(Line::from("skip_permissions: \u{2713}"));
+            }
+        }
+        Backend::Codex => {
+            if profile.full_auto.unwrap_or(false) {
+                lines.push(Line::from("full_auto: \u{2713}"));
+            }
+        }
     }
     if let Some(extra) = &profile.extra_args {
         if !extra.is_empty() {
@@ -145,47 +208,26 @@ fn build_detail(profile: &Profile) -> Vec<Line<'static>> {
 
 fn build_form_lines(form: &FormState) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
+    let labels = field_labels(&form.backend);
 
     if form.confirming {
         lines.push(
             Line::from("Save this profile?").style(Style::default().add_modifier(Modifier::BOLD)),
         );
         lines.push(Line::from(""));
-        lines.push(Line::from(format!("  Name:        {}", form.fields[0])));
-        lines.push(Line::from(format!(
-            "  Description: {}",
-            if form.fields[1].is_empty() {
-                "(none)"
-            } else {
-                &form.fields[1]
-            }
-        )));
-        lines.push(Line::from(format!(
-            "  Base URL:    {}",
-            if form.fields[2].is_empty() {
-                "(none)"
-            } else {
-                &form.fields[2]
-            }
-        )));
-        lines.push(Line::from(format!(
-            "  API Key:     {}",
-            if form.fields[3].is_empty() {
+        for (i, label) in labels.iter().enumerate() {
+            let val = form.fields[i].trim();
+            let display = if val.is_empty() {
                 "(none)".to_string()
+            } else if label.contains("Key") {
+                mask_value("API_KEY", val).to_string()
             } else {
-                mask_value("API_KEY", &form.fields[3]).to_string()
-            }
-        )));
-        lines.push(Line::from(format!(
-            "  Model:       {}",
-            if form.fields[4].is_empty() {
-                "(none)"
-            } else {
-                &form.fields[4]
-            }
-        )));
+                val.to_string()
+            };
+            lines.push(Line::from(format!("  {:<14} {}", format!("{}:", label.trim_end_matches(" *")), display)));
+        }
     } else {
-        for (i, label) in FIELD_LABELS.iter().enumerate() {
+        for (i, label) in labels.iter().enumerate() {
             let prefix = if i == form.active_field { "> " } else { "  " };
             let style = if i == form.active_field {
                 Style::default()
@@ -327,11 +369,91 @@ mod tests {
 
     #[test]
     fn ui_footer_shows_add_hint() {
-        let normal_footer =
-            " [↑↓/jk] Navigate  [Enter] Launch  [c] Resume  [s] Skip-perms  [a] Add  [e] Edit config  [q/Ctrl-C] Quit";
-        assert!(normal_footer.contains("[a] Add"));
-        assert!(normal_footer.contains("[s] Skip-perms"));
-        assert!(normal_footer.contains("[c] Resume"));
+        // Claude footer
+        let claude_footer =
+            " [Tab/1/2] Backend  [↑↓/jk] Navigate  [Enter] Launch  [c] Resume  [s] Skip-perms  [a] Add  [e] Edit config  [q] Quit";
+        assert!(claude_footer.contains("[a] Add"));
+        assert!(claude_footer.contains("[s] Skip-perms"));
+        assert!(claude_footer.contains("[c] Resume"));
+        assert!(claude_footer.contains("[Tab/1/2] Backend"));
+
+        // Codex footer
+        let codex_footer =
+            " [Tab/1/2] Backend  [↑↓/jk] Navigate  [Enter] Launch  [s] Full-auto  [a] Add  [e] Edit config  [q] Quit";
+        assert!(codex_footer.contains("[a] Add"));
+        assert!(codex_footer.contains("[s] Full-auto"));
+        assert!(!codex_footer.contains("[c] Resume"), "Codex footer should not show Resume");
+    }
+
+    #[test]
+    fn tab_bar_renders_with_active_highlight() {
+        use crate::config::Backend;
+
+        // Claude active
+        let lines = build_tab_bar(&Backend::Claude);
+        let text: String = lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("");
+        assert!(text.contains("[Claude]"), "Expected [Claude] in tab bar, got: {text}");
+        assert!(text.contains("[Codex]"), "Expected [Codex] in tab bar, got: {text}");
+
+        // Codex active
+        let lines = build_tab_bar(&Backend::Codex);
+        let text: String = lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("");
+        assert!(text.contains("[Claude]"), "Expected [Claude] in tab bar, got: {text}");
+        assert!(text.contains("[Codex]"), "Expected [Codex] in tab bar, got: {text}");
+    }
+
+    #[test]
+    fn detail_panel_shows_full_auto_for_codex_profile() {
+        use crate::config::Backend;
+
+        let codex_profile = Profile {
+            name: "codex-test".into(),
+            description: Some("Codex profile".into()),
+            env: None,
+            model: Some("o3".into()),
+            skip_permissions: None,
+            extra_args: None,
+            backend: Backend::Codex,
+            base_url: Some("https://api.openai.com".into()),
+            full_auto: Some(true),
+        };
+
+        let lines = build_detail(&codex_profile);
+        let joined: String = lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+
+        // Should show full_auto instead of skip_permissions
+        assert!(
+            joined.contains("full_auto:"),
+            "Expected 'full_auto:' in codex detail, got:\n{joined}"
+        );
+        assert!(
+            !joined.contains("skip_permissions:"),
+            "Should NOT show 'skip_permissions:' for codex profile, got:\n{joined}"
+        );
+
+        // Claude profile with skip_permissions should still show skip_permissions
+        let claude_profile = Profile {
+            name: "claude-test".into(),
+            description: None,
+            env: None,
+            model: None,
+            skip_permissions: Some(true),
+            extra_args: None,
+            backend: Backend::Claude,
+            base_url: None,
+            full_auto: None,
+        };
+
+        let lines = build_detail(&claude_profile);
+        let joined: String = lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        assert!(
+            joined.contains("skip_permissions:"),
+            "Expected 'skip_permissions:' in claude detail, got:\n{joined}"
+        );
+        assert!(
+            !joined.contains("full_auto:"),
+            "Should NOT show 'full_auto:' for claude profile, got:\n{joined}"
+        );
     }
 
     #[test]
@@ -343,6 +465,9 @@ mod tests {
             model: None,
             skip_permissions: Some(true),
             extra_args: None,
+            backend: crate::config::Backend::Claude,
+            base_url: None,
+            full_auto: None,
         };
         // Verify skip_permissions triggers the red-style branch
         assert!(profile.skip_permissions.unwrap_or(false));
@@ -360,7 +485,65 @@ mod tests {
             model: None,
             skip_permissions: Some(false),
             extra_args: None,
+            backend: crate::config::Backend::Claude,
+            base_url: None,
+            full_auto: None,
         };
         assert!(!safe_profile.skip_permissions.unwrap_or(false));
+    }
+
+    /// Codex input form must show codex-specific labels, not Claude labels.
+    #[test]
+    fn codex_input_form_shows_codex_labels() {
+        use crate::config::Backend;
+        let mut form = FormState::new();
+        form.backend = Backend::Codex;
+        form.fields[0] = "test".into();
+
+        let lines = build_form_lines(&form);
+        let joined: String = lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+
+        // Must contain codex-specific labels
+        assert!(joined.contains("Base URL"), "Codex form must show 'Base URL' label");
+        assert!(joined.contains("Full Auto"), "Codex form must show 'Full Auto' label");
+        // Must NOT contain claude-only label "Description"
+        assert!(!joined.contains("Description"), "Codex form must NOT show 'Description' label");
+    }
+
+    /// Codex confirmation view must show codex labels and field values in correct positions.
+    #[test]
+    fn codex_confirm_shows_codex_labels_with_correct_values() {
+        use crate::config::Backend;
+        let mut form = FormState::new();
+        form.backend = Backend::Codex;
+        form.confirming = true;
+        form.fields[0] = "my-codex".into();
+        form.fields[1] = "https://api.openai.com".into(); // Base URL
+        form.fields[2] = "sk-openai-key".into();          // API Key
+        form.fields[3] = "gpt-5.3".into();                // Model
+        form.fields[4] = "y".into();                       // Full Auto
+
+        let lines = build_form_lines(&form);
+        let joined: String = lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+
+        // Labels must be codex-specific
+        assert!(joined.contains("Base URL"), "Confirm must show 'Base URL' label");
+        assert!(joined.contains("Model"), "Confirm must show 'Model' label");
+        assert!(joined.contains("Full Auto"), "Confirm must show 'Full Auto' label");
+        assert!(!joined.contains("Description"), "Confirm must NOT show 'Description' for codex");
+
+        // Values must appear next to correct labels (Base URL line has the URL, not the key)
+        let base_url_line = lines.iter().map(|l| l.to_string()).find(|l| l.contains("Base URL")).unwrap();
+        assert!(base_url_line.contains("https://api.openai.com"),
+            "Base URL line must contain the URL value, got: {base_url_line}");
+
+        let model_line = lines.iter().map(|l| l.to_string()).find(|l| l.contains("Model")).unwrap();
+        assert!(model_line.contains("gpt-5.3"),
+            "Model line must contain model value, got: {model_line}");
+
+        // API Key must be masked
+        let key_line = lines.iter().map(|l| l.to_string()).find(|l| l.contains("Key")).unwrap();
+        assert!(key_line.contains("***"), "API Key must be masked in confirmation");
+        assert!(!key_line.contains("sk-openai-key"), "API Key must NOT appear in cleartext");
     }
 }

@@ -3,13 +3,13 @@ doc_type: module
 module_name: "app"
 module_path: "src/app.rs"
 generated_by: mci-phase-2
-revision: 2
-updated: 2026-03-03
+revision: 3
+updated: 2026-03-15
 ---
 
 # app Module Documentation
 
-> **Purpose**: Owns the mutable cursor state (selected profile index) and provides circular navigation (`next`/`prev`) over the profile list for the TUI event loop.
+> **Purpose**: Owns the mutable cursor state (selected profile index), provides backend-filtered circular navigation, manages TUI mode transitions, and contains `FormState` with `to_new_profile()` as the single source of truth for form-field-to-semantic mapping.
 > **Path**: src/app.rs
 
 ---
@@ -19,7 +19,15 @@ updated: 2026-03-03
 
 ### Exported Constants
 
-- `pub const FIELD_LABELS: [&str; 5]` — ordered labels for the 5 add-form fields: `["Name *", "Description", "Base URL", "API Key", "Model"]`. Used by `ui::build_form_lines` to render field labels and by tests to assert the contract.
+- `pub const FIELD_LABELS: [&str; 5]` — Claude-specific ordered labels for the 5 add-form fields: `["Name *", "Description", "Base URL", "API Key", "Model"]`. Retained for backward compatibility; prefer `field_labels(backend)` for backend-aware rendering.
+
+### Exported Free Functions
+
+- `pub fn field_labels(backend: &Backend) -> [&'static str; 5]`
+  - Returns backend-specific field label arrays for the 5-slot add form:
+    - `Backend::Claude` → `["Name *", "Description", "Base URL", "API Key", "Model"]`
+    - `Backend::Codex` → `["Name *", "Base URL", "API Key", "Model", "Full Auto (y/n)"]`
+  - Used by `ui::build_form_lines` and internally by `FormState::to_new_profile` to keep label order and field mapping in sync.
 
 ### Exported Enums
 
@@ -30,33 +38,37 @@ updated: 2026-03-03
 ### Exported Structs
 
 - `pub struct FormState` — holds the transient state of the inline add form:
-  - `pub fields: [String; 5]` — one string buffer per field (Name, Description, Base URL, API Key, Model).
+  - `pub fields: [String; 5]` — one string buffer per field. The semantic meaning of each index depends on `backend`:
+    - Claude: `[0]=Name, [1]=Description, [2]=Base URL, [3]=API Key, [4]=Model`
+    - Codex: `[0]=Name, [1]=Base URL, [2]=API Key, [3]=Model, [4]=Full Auto (y/n)`
   - `pub active_field: usize` — index of the currently focused field (0–4); clamped by `next_field`/`prev_field`.
-  - `pub confirming: bool` — when `true`, the form shows the confirmation summary view instead of the edit view.
-  - `pub error: Option<String>` — inline validation error displayed below the form (e.g., "Name is required" or "Profile already exists").
-  - Derives: `Default` (via manual impl that calls `FormState::new()`).
+  - `pub confirming: bool` — when `true`, the form shows the confirmation summary view.
+  - `pub error: Option<String>` — inline validation error displayed below the form.
+  - `pub backend: Backend` — determines which field layout is in use.
 
 - `pub struct App` — sole owner of all runtime TUI state.
 
 ### App Fields
 
-- `pub profiles: Vec<Profile>` — ordered list of profiles loaded from `~/.config/cc-tui/profiles.toml`; may be replaced in-place during hot-reload.
-- `pub selected: usize` — zero-based index of the currently highlighted profile row.
+- `pub profiles: Vec<Profile>` — full unfiltered profile list loaded from disk; may be replaced on hot-reload.
+- `pub selected: usize` — logical cursor within the **filtered** profile list for `active_backend`.
 - `pub mode: AppMode` — current UI mode; `Normal` on construction.
+- `pub active_backend: Backend` — which backend tab is currently visible; `Backend::Claude` on construction.
 
 ### App Methods
 
-- `App::new(profiles: Vec<Profile>) -> Self` — constructs an `App` with `selected = 0` and `mode = AppMode::Normal`.
-- `app.next(&mut self)` — advances `selected` by one, wrapping circularly; no-op when `profiles` is empty.
-- `app.prev(&mut self)` — retreats `selected` by one, wrapping circularly; no-op when `profiles` is empty.
+- `App::new(profiles: Vec<Profile>) -> Self` — constructs with `selected = 0`, `mode = AppMode::Normal`, `active_backend = Backend::Claude`.
+- `app.filtered_indices(&self) -> Vec<usize>` — returns the indices (into `self.profiles`) of all profiles whose `backend == self.active_backend`. Used by `ui` for list rendering and by `next`/`prev` for filtered navigation.
+- `app.switch_backend(&mut self, backend: Backend)` — sets `active_backend` and resets `selected` to `0` so the cursor lands on the first profile in the new backend's subset.
+- `app.next(&mut self)` — advances `selected` within `filtered_indices()`, wrapping circularly; no-op when the filtered list is empty.
+- `app.prev(&mut self)` — retreats `selected` within `filtered_indices()`, wrapping circularly; no-op when the filtered list is empty.
 
 ### FormState Methods
 
-- `FormState::new() -> Self` — constructs with all fields empty, `active_field = 0`, `confirming = false`, `error = None`.
-- `form.next_field(&mut self)` — advances `active_field` by one, clamped at `4` (index of the last field).
+- `FormState::new() -> Self` — constructs with all fields empty, `active_field = 0`, `confirming = false`, `error = None`, `backend = Backend::Claude`.
+- `form.next_field(&mut self)` — advances `active_field` by one, clamped at `4`.
 - `form.prev_field(&mut self)` — retreats `active_field` by one, clamped at `0` via `saturating_sub`.
-
-**Quality Check**: 10 public interface points documented (2 constants, 1 enum, 2 structs, 5 methods).
+- `form.to_new_profile(&self) -> NewProfile` — **single source of truth** for form-field-to-semantic mapping. Reads `self.fields` according to `self.backend`'s index convention and constructs a `NewProfile`. Codex path additionally parses `fields[4]` as `"y"/"yes"` → `full_auto = true`.
 <!-- END:interface -->
 
 ---
@@ -64,10 +76,10 @@ updated: 2026-03-03
 <!-- BEGIN:dependency_graph -->
 ## 2. Dependency Graph
 
-- **Imports from `crate::config`** → `Profile` struct (the element type of `Vec<Profile>`); this is the only cross-module dependency.
-- **No `std` imports beyond language primitives** — no I/O, threading, or collections beyond `Vec` (already provided by the prelude).
-- **No external crates** — the module carries zero third-party dependencies.
-- **Does NOT depend on**: `ui`, `launch`, `config::load_profiles`, or any OS APIs. It is deliberately isolated so it can be unit-tested without a terminal or filesystem.
+- **Imports from `crate::config`** → `Backend` enum, `NewProfile`, and `Profile` struct. The `app` module now imports `Backend` to type `active_backend` and `FormState.backend`, and imports `NewProfile` for `to_new_profile()`.
+- **No `std` imports beyond language primitives** — no I/O, threading, or collections beyond `Vec`.
+- **No external crates** — zero third-party dependencies.
+- **Does NOT depend on**: `ui`, `launch`, `config::load_profiles`, or any OS APIs.
 
 **Quality Check**: Single internal dependency clearly stated; absence of external dependencies confirmed.
 <!-- END:dependency_graph -->
@@ -79,12 +91,12 @@ updated: 2026-03-03
 
 **Type**: Stateful — `App` is the single mutable owner of all TUI runtime state.
 
-- **`selected` field** — mutated in-place by `next()` and `prev()` on every keypress. Its lifecycle begins at `0` (construction) and ends when the process is exec-replaced or exits. It never touches disk.
-- **`profiles` field** — initially set from `config::load_profiles()` in `main`. On hot-reload (key `e`), `main.rs` replaces `app.profiles` entirely with a freshly parsed `Vec<Profile>`. After replacement, `main.rs` clamps `selected` with `app.selected = app.profiles.len().saturating_sub(1)` if the cursor is now out of bounds (the clamp logic lives in the caller, not in `App` itself).
-- **`mode` field** — transitions between `AppMode::Normal` and `AppMode::AddForm(FormState)`. The `AddForm` variant owns a `FormState` by value. When the form is saved or cancelled, `mode` is set back to `Normal`. The `FormState` is dropped when `Normal` is entered.
-- **`FormState.fields`** — five `String` buffers edited in-place by the event loop as the user types. On form save, `main.rs` reads fields by index (0=Name, 1=Description, 2=Base URL, 3=API Key, 4=Model), constructs a `config::NewProfile`, and calls `config::append_profile`.
-- **Circular wrapping** — `next()` uses `% profiles.len()` and `prev()` explicitly wraps from `0` to `len - 1`, so `selected` is always a valid index whenever the list is non-empty.
-- **No interior mutability** — there are no `Mutex`, `RefCell`, or `Arc` wrappers; the caller holds a single `&mut App` and drives all mutations sequentially from the event loop.
+- **`selected` field** — mutated in-place by `next()` and `prev()` on every keypress within the filtered subset. Its lifecycle begins at `0` and ends when the process is exec-replaced or exits.
+- **`active_backend` field** — set by `switch_backend()`; drives which profiles are visible in `filtered_indices()`. Switching backend resets `selected` to `0`.
+- **`profiles` field** — unfiltered; may be replaced entirely on hot-reload. `main.rs` clamps `selected` to the new filtered length after replacement.
+- **`mode` field** — transitions between `AppMode::Normal` and `AppMode::AddForm(FormState)`. When `AddForm` is created, it inherits `active_backend` so the form renders the correct field labels. When saved or cancelled, `mode` returns to `Normal` and `FormState` is dropped.
+- **`FormState.fields`** — five `String` buffers edited in-place. Semantic meaning of each index is determined by `FormState.backend` and enforced by `to_new_profile()`.
+- **No interior mutability** — no `Mutex`, `RefCell`, or `Arc`; single `&mut App` driven by the event loop.
 
 **Quality Check**: State lifecycle, mutation points, and ownership model fully documented.
 <!-- END:state_management -->
@@ -189,4 +201,4 @@ fn main() -> anyhow::Result<()> {
 ---
 
 **Template Version**: 2.0
-**Last Updated**: 2026-03-03 (revision 2 — added AppMode, FormState, FIELD_LABELS)
+**Last Updated**: 2026-03-15 (revision 3 — added Backend, active_backend, filtered_indices, switch_backend, field_labels, FormState.backend, FormState.to_new_profile)

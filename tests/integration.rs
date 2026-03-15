@@ -76,6 +76,9 @@ fn build_args_ordering() {
         model: Some("opus".into()),
         skip_permissions: Some(true),
         extra_args: Some(vec!["--verbose".into(), "--debug".into()]),
+        backend: cct::config::Backend::Claude,
+        base_url: None,
+        full_auto: None,
     };
     let args = launch::build_args(&profile, false);
     assert_eq!(
@@ -101,6 +104,9 @@ fn build_args_empty_profile() {
         model: None,
         skip_permissions: None,
         extra_args: None,
+        backend: cct::config::Backend::Claude,
+        base_url: None,
+        full_auto: None,
     };
     let args = launch::build_args(&profile, false);
     assert!(args.is_empty());

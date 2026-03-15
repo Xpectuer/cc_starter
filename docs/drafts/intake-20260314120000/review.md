@@ -4,8 +4,8 @@ doc_type: proc
 brief: "Self-review of plan.md against spec acceptance criteria"
 confidence: verified
 created: 2026-03-14
-updated: 2026-03-14
-revision: 1
+updated: 2026-03-15
+revision: 2
 ---
 
 # Plan Review
@@ -24,6 +24,16 @@ Spec: `./spec.md`
 | Execution order valid | PASS | Linear dependency chain, no step depends on a later step |
 | Commit message valid | PASS | "feat: add codex backend support with tab switching UI" (52 chars) |
 | Terminal steps present | PASS | Steps 7-10: proof-read, criteria, review, commit |
+
+## Issues Fixed in Rev 2
+
+| Issue | Severity | Fix |
+|-------|----------|-----|
+| Profile missing `base_url` field | Critical | Added `base_url: Option<String>` to Profile struct (Step 1) |
+| Codex form missing Base URL | Medium | Codex form: Name, Base URL, API Key, Model, Full Auto (drop Description, keep 5 fields) |
+| Codex env generation unclear | Medium | Clarified: codex only generates `OPENAI_API_KEY` in env (base_url via config.toml) |
+| `generate_codex_config` used env fallback | Medium | Now reads `profile.base_url` directly (first-class field) |
+| No codex binary check before exec | Minor | Added `check_codex_installed()` with friendly error message |
 
 ## Gaps Found
 

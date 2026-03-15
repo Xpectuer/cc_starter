@@ -1,7 +1,7 @@
 use crate::config::Profile;
 use anyhow::{Context, Result};
 use crossterm::{execute, terminal::LeaveAlternateScreen};
-use std::{env, io, os::unix::process::CommandExt, path::Path, process::Command};
+use std::{env, fs, io, os::unix::process::CommandExt, path::{Path, PathBuf}, process::Command};
 
 /// Restore terminal to cooked mode. Must be called before exec or editor spawn.
 pub fn restore_terminal() {
@@ -28,6 +28,16 @@ pub fn build_args(profile: &Profile, with_continue: bool) -> Vec<String> {
     args
 }
 
+/// Return the binary name and argument list for launching a profile.
+/// Dispatches by `profile.backend`: Claude uses `build_args`, Codex uses `build_codex_args`.
+/// The `with_continue` flag only applies to Claude (ignored for Codex).
+pub fn build_launch_command(profile: &Profile, with_continue: bool) -> (String, Vec<String>) {
+    match profile.backend {
+        crate::config::Backend::Claude => ("claude".into(), build_args(profile, with_continue)),
+        crate::config::Backend::Codex => ("codex".into(), build_codex_args(profile)),
+    }
+}
+
 /// Inject profile env vars and exec-replace the current process with `claude`.
 /// Returns only on error (process was not replaced).
 pub fn exec_claude(profile: &Profile, with_continue: bool) -> anyhow::Error {
@@ -39,6 +49,69 @@ pub fn exec_claude(profile: &Profile, with_continue: bool) -> anyhow::Error {
     let args = build_args(profile, with_continue);
     let err = Command::new("claude").args(&args).exec();
     anyhow::anyhow!("exec claude: {err}")
+}
+
+/// Check if `codex` is available in PATH.
+pub fn check_codex_installed() -> bool {
+    Command::new("which")
+        .arg("codex")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Generate codex config.toml at a specified directory.
+/// Content is derived from the profile's name, model, and base_url fields.
+pub fn generate_codex_config(profile: &Profile, codex_home: &Path) -> anyhow::Result<()> {
+    fs::create_dir_all(codex_home)?;
+    let model = profile.model.as_deref().unwrap_or("gpt-4.1");
+    let name = &profile.name;
+    let base_url = profile.base_url.as_deref().unwrap_or("");
+    let config_content = format!(
+        "model_provider = \"custom\"\nmodel = \"{model}\"\n\n[model_providers.custom]\nname = \"{name}\"\nbase_url = \"{base_url}\"\nrequires_openai_auth = true\n"
+    );
+    fs::write(codex_home.join("config.toml"), config_content)?;
+    Ok(())
+}
+
+/// Build the CLI argument list for `codex` from a profile. Pure — no side effects.
+pub fn build_codex_args(profile: &Profile) -> Vec<String> {
+    let mut args = Vec::new();
+    if profile.full_auto.unwrap_or(false) {
+        args.push("--full-auto".to_string());
+    }
+    if let Some(extra) = &profile.extra_args {
+        args.extend(extra.iter().cloned());
+    }
+    args
+}
+
+/// Generate codex config, inject profile env vars, set CODEX_HOME, and exec-replace with `codex`.
+pub fn exec_codex(profile: &Profile) -> anyhow::Error {
+    if !check_codex_installed() {
+        return anyhow::anyhow!(
+            "codex CLI not found in PATH. Install it first: npm install -g @openai/codex"
+        );
+    }
+    let codex_home = dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("~/.config"))
+        .join("cc-tui")
+        .join("codex")
+        .join(&profile.name);
+    if let Err(e) = generate_codex_config(profile, &codex_home) {
+        return anyhow::anyhow!("failed to generate codex config: {e}");
+    }
+    env::set_var("CODEX_HOME", &codex_home);
+    if let Some(env_map) = &profile.env {
+        for (k, v) in env_map {
+            env::set_var(k, v);
+        }
+    }
+    let args = build_codex_args(profile);
+    let err = Command::new("codex").args(&args).exec();
+    anyhow::anyhow!("exec codex: {err}")
 }
 
 /// Check if `claude` (or override via CCT_CLAUDE_BIN) is available in PATH.
@@ -127,6 +200,9 @@ mod tests {
             model: model.map(Into::into),
             skip_permissions: skip,
             extra_args: extra.map(|v| v.into_iter().map(Into::into).collect()),
+            backend: crate::config::Backend::Claude,
+            base_url: None,
+            full_auto: None,
         }
     }
 
@@ -199,5 +275,118 @@ mod tests {
                 "--verbose",
             ]
         );
+    }
+
+    // --- Codex tests ---
+
+    fn codex_profile(
+        name: &str,
+        model: Option<&str>,
+        base_url: Option<&str>,
+        full_auto: Option<bool>,
+        extra: Option<Vec<&str>>,
+    ) -> Profile {
+        Profile {
+            name: name.into(),
+            description: None,
+            env: None,
+            model: model.map(Into::into),
+            skip_permissions: None,
+            extra_args: extra.map(|v| v.into_iter().map(Into::into).collect()),
+            backend: crate::config::Backend::Codex,
+            base_url: base_url.map(Into::into),
+            full_auto,
+        }
+    }
+
+    #[test]
+    fn build_codex_args_empty() {
+        let p = codex_profile("test", None, None, None, None);
+        assert!(build_codex_args(&p).is_empty());
+    }
+
+    #[test]
+    fn build_codex_args_full_auto_only() {
+        let p = codex_profile("test", None, None, Some(true), None);
+        assert_eq!(build_codex_args(&p), vec!["--full-auto"]);
+    }
+
+    #[test]
+    fn build_codex_args_extra_only() {
+        let p = codex_profile("test", None, None, None, Some(vec!["--quiet"]));
+        assert_eq!(build_codex_args(&p), vec!["--quiet"]);
+    }
+
+    #[test]
+    fn build_codex_args_full_auto_and_extra() {
+        let p = codex_profile("test", None, None, Some(true), Some(vec!["--quiet", "--json"]));
+        assert_eq!(
+            build_codex_args(&p),
+            vec!["--full-auto", "--quiet", "--json"]
+        );
+    }
+
+    #[test]
+    fn generate_codex_config_writes_correct_toml() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = codex_profile(
+            "my-codex",
+            Some("gpt-4.1"),
+            Some("https://api.example.com/v1"),
+            None,
+            None,
+        );
+        generate_codex_config(&p, tmp.path()).unwrap();
+
+        let content = std::fs::read_to_string(tmp.path().join("config.toml")).unwrap();
+        assert!(content.contains("model_provider = \"custom\""));
+        assert!(content.contains("model = \"gpt-4.1\""));
+        assert!(content.contains("name = \"my-codex\""));
+        assert!(content.contains("base_url = \"https://api.example.com/v1\""));
+        assert!(content.contains("[model_providers.custom]"));
+        assert!(content.contains("requires_openai_auth = true"));
+        assert!(!content.contains("env_key"), "should not contain env_key");
+    }
+
+    #[test]
+    fn build_launch_command_dispatches_claude() {
+        let p = profile(Some("opus"), Some(true), Some(vec!["--verbose"]));
+        let (bin, args) = build_launch_command(&p, false);
+        assert_eq!(bin, "claude");
+        assert_eq!(
+            args,
+            vec!["--model", "opus", "--dangerously-skip-permissions", "--verbose"]
+        );
+    }
+
+    #[test]
+    fn build_launch_command_dispatches_claude_with_continue() {
+        let p = profile(None, None, None);
+        let (bin, args) = build_launch_command(&p, true);
+        assert_eq!(bin, "claude");
+        assert_eq!(args, vec!["--continue"]);
+    }
+
+    #[test]
+    fn build_launch_command_dispatches_codex() {
+        let p = codex_profile("test", None, None, Some(true), Some(vec!["--quiet"]));
+        let (bin, args) = build_launch_command(&p, false);
+        assert_eq!(bin, "codex");
+        assert_eq!(args, vec!["--full-auto", "--quiet"]);
+        // with_continue is ignored for codex
+        let (bin2, args2) = build_launch_command(&p, true);
+        assert_eq!(bin2, "codex");
+        assert_eq!(args2, vec!["--full-auto", "--quiet"]);
+    }
+
+    #[test]
+    fn generate_codex_config_defaults_model() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = codex_profile("fallback", None, None, None, None);
+        generate_codex_config(&p, tmp.path()).unwrap();
+
+        let content = std::fs::read_to_string(tmp.path().join("config.toml")).unwrap();
+        assert!(content.contains("model = \"gpt-4.1\""));
+        assert!(content.contains("base_url = \"\""));
     }
 }

@@ -1,4 +1,11 @@
-use crate::config::Profile;
+use crate::config::{Backend, NewProfile, Profile};
+
+pub fn field_labels(backend: &Backend) -> [&'static str; 5] {
+    match backend {
+        Backend::Claude => ["Name *", "Description", "Base URL", "API Key", "Model"],
+        Backend::Codex => ["Name *", "Base URL", "API Key", "Model", "Full Auto (y/n)"],
+    }
+}
 
 pub const FIELD_LABELS: [&str; 5] = ["Name *", "Description", "Base URL", "API Key", "Model"];
 
@@ -12,6 +19,7 @@ pub struct FormState {
     pub active_field: usize,
     pub confirming: bool,
     pub error: Option<String>,
+    pub backend: Backend,
 }
 
 impl Default for FormState {
@@ -33,6 +41,7 @@ impl FormState {
             active_field: 0,
             confirming: false,
             error: None,
+            backend: Backend::Claude,
         }
     }
 
@@ -43,12 +52,52 @@ impl FormState {
     pub fn prev_field(&mut self) {
         self.active_field = self.active_field.saturating_sub(1);
     }
+
+    /// Map form fields to NewProfile based on backend.
+    /// Single source of truth for field-index-to-semantic mapping.
+    pub fn to_new_profile(&self) -> NewProfile {
+        let name = self.fields[0].trim().to_string();
+        match self.backend {
+            Backend::Claude => {
+                let desc = self.fields[1].trim().to_string();
+                let base_url = self.fields[2].trim().to_string();
+                let api_key = self.fields[3].trim().to_string();
+                let model = self.fields[4].trim().to_string();
+                NewProfile {
+                    name,
+                    description: if desc.is_empty() { None } else { Some(desc) },
+                    base_url: if base_url.is_empty() { None } else { Some(base_url) },
+                    api_key: if api_key.is_empty() { None } else { Some(api_key) },
+                    model: if model.is_empty() { None } else { Some(model) },
+                    backend: Backend::Claude,
+                    full_auto: None,
+                }
+            }
+            Backend::Codex => {
+                let base_url = self.fields[1].trim().to_string();
+                let api_key = self.fields[2].trim().to_string();
+                let model = self.fields[3].trim().to_string();
+                let full_auto_str = self.fields[4].trim().to_lowercase();
+                let full_auto = matches!(full_auto_str.as_str(), "y" | "yes");
+                NewProfile {
+                    name,
+                    description: None,
+                    base_url: if base_url.is_empty() { None } else { Some(base_url) },
+                    api_key: if api_key.is_empty() { None } else { Some(api_key) },
+                    model: if model.is_empty() { None } else { Some(model) },
+                    backend: Backend::Codex,
+                    full_auto: Some(full_auto),
+                }
+            }
+        }
+    }
 }
 
 pub struct App {
     pub profiles: Vec<Profile>,
     pub selected: usize,
     pub mode: AppMode,
+    pub active_backend: Backend,
 }
 
 impl App {
@@ -57,22 +106,48 @@ impl App {
             profiles,
             selected: 0,
             mode: AppMode::Normal,
+            active_backend: Backend::Claude,
         }
     }
 
+    pub fn filtered_indices(&self) -> Vec<usize> {
+        self.profiles
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.backend == self.active_backend)
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    pub fn switch_backend(&mut self, backend: Backend) {
+        self.active_backend = backend;
+        let indices = self.filtered_indices();
+        self.selected = indices.first().copied().unwrap_or(0);
+    }
+
     pub fn next(&mut self) {
-        if !self.profiles.is_empty() {
-            self.selected = (self.selected + 1) % self.profiles.len();
+        let indices = self.filtered_indices();
+        if indices.is_empty() {
+            return;
+        }
+        if let Some(pos) = indices.iter().position(|&i| i == self.selected) {
+            let next_pos = (pos + 1) % indices.len();
+            self.selected = indices[next_pos];
+        } else {
+            self.selected = indices[0];
         }
     }
 
     pub fn prev(&mut self) {
-        if !self.profiles.is_empty() {
-            if self.selected == 0 {
-                self.selected = self.profiles.len() - 1;
-            } else {
-                self.selected -= 1;
-            }
+        let indices = self.filtered_indices();
+        if indices.is_empty() {
+            return;
+        }
+        if let Some(pos) = indices.iter().position(|&i| i == self.selected) {
+            let prev_pos = if pos == 0 { indices.len() - 1 } else { pos - 1 };
+            self.selected = indices[prev_pos];
+        } else {
+            self.selected = indices[0];
         }
     }
 }
@@ -141,6 +216,90 @@ mod tests {
         assert!(matches!(app.mode, AppMode::Normal));
     }
 
+    fn make_profile(name: &str, backend: crate::config::Backend) -> Profile {
+        Profile {
+            name: name.into(),
+            description: None,
+            env: None,
+            extra_args: None,
+            skip_permissions: None,
+            model: None,
+            backend,
+            base_url: None,
+            full_auto: None,
+        }
+    }
+
+    #[test]
+    fn filtered_indices_returns_correct_backend_subset() {
+        use crate::config::Backend;
+        let profiles = vec![
+            make_profile("claude-1", Backend::Claude),
+            make_profile("codex-1", Backend::Codex),
+            make_profile("claude-2", Backend::Claude),
+            make_profile("codex-2", Backend::Codex),
+        ];
+        let mut app = App::new(profiles);
+
+        // Default active_backend is Claude
+        assert_eq!(app.filtered_indices(), vec![0, 2]);
+
+        app.active_backend = Backend::Codex;
+        assert_eq!(app.filtered_indices(), vec![1, 3]);
+    }
+
+    #[test]
+    fn switch_backend_resets_selected_to_first_matching() {
+        use crate::config::Backend;
+        let profiles = vec![
+            make_profile("claude-1", Backend::Claude),
+            make_profile("codex-1", Backend::Codex),
+            make_profile("claude-2", Backend::Claude),
+        ];
+        let mut app = App::new(profiles);
+        app.selected = 2; // pointing at claude-2
+
+        app.switch_backend(Backend::Codex);
+        assert_eq!(app.active_backend, Backend::Codex);
+        assert_eq!(app.selected, 1); // first codex profile
+    }
+
+    #[test]
+    fn next_prev_navigate_within_filtered_backend() {
+        use crate::config::Backend;
+        let profiles = vec![
+            make_profile("claude-1", Backend::Claude),
+            make_profile("codex-1", Backend::Codex),
+            make_profile("claude-2", Backend::Claude),
+            make_profile("codex-2", Backend::Codex),
+        ];
+        let mut app = App::new(profiles);
+        // active_backend = Claude, filtered = [0, 2]
+        assert_eq!(app.selected, 0);
+
+        app.next();
+        assert_eq!(app.selected, 2); // skip codex-1
+
+        app.next();
+        assert_eq!(app.selected, 0); // wrap around
+
+        app.prev();
+        assert_eq!(app.selected, 2); // wrap backward
+
+        app.prev();
+        assert_eq!(app.selected, 0);
+    }
+
+    #[test]
+    fn field_labels_returns_backend_specific_labels() {
+        use crate::config::Backend;
+        let claude_labels = field_labels(&Backend::Claude);
+        assert_eq!(claude_labels, ["Name *", "Description", "Base URL", "API Key", "Model"]);
+
+        let codex_labels = field_labels(&Backend::Codex);
+        assert_eq!(codex_labels, ["Name *", "Base URL", "API Key", "Model", "Full Auto (y/n)"]);
+    }
+
     #[test]
     fn form_state_five_fields() {
         // FIELD_LABELS should have exactly 5 entries with correct labels
@@ -164,5 +323,103 @@ mod tests {
             form.next_field();
         }
         assert_eq!(form.active_field, 4, "next_field must clamp at 4");
+    }
+
+    /// Invariant: for every backend, field_labels()[i] describes what
+    /// to_new_profile() puts into the corresponding NewProfile field.
+    /// If someone reorders labels without updating the mapping (or vice versa),
+    /// this test catches it.
+    #[test]
+    fn claude_form_field_mapping_matches_labels() {
+        use crate::config::Backend;
+        let labels = field_labels(&Backend::Claude);
+
+        // Fill fields with unique sentinel values matching the label semantics
+        let mut form = FormState::new();
+        form.backend = Backend::Claude;
+        form.fields[0] = "my-profile".into();      // labels[0] = "Name *"
+        form.fields[1] = "A description".into();    // labels[1] = "Description"
+        form.fields[2] = "https://example.com".into(); // labels[2] = "Base URL"
+        form.fields[3] = "sk-secret-123".into();    // labels[3] = "API Key"
+        form.fields[4] = "claude-opus".into();       // labels[4] = "Model"
+
+        let np = form.to_new_profile();
+
+        // Verify each label's position maps to the correct NewProfile field
+        assert!(labels[0].contains("Name"));
+        assert_eq!(np.name, "my-profile");
+
+        assert!(labels[1].contains("Description"));
+        assert_eq!(np.description.as_deref(), Some("A description"));
+
+        assert!(labels[2].contains("Base URL"));
+        assert_eq!(np.base_url.as_deref(), Some("https://example.com"));
+
+        assert!(labels[3].contains("Key"));
+        assert_eq!(np.api_key.as_deref(), Some("sk-secret-123"));
+
+        assert!(labels[4].contains("Model"));
+        assert_eq!(np.model.as_deref(), Some("claude-opus"));
+
+        assert_eq!(np.backend, Backend::Claude);
+        assert!(np.full_auto.is_none());
+    }
+
+    #[test]
+    fn codex_form_field_mapping_matches_labels() {
+        use crate::config::Backend;
+        let labels = field_labels(&Backend::Codex);
+
+        let mut form = FormState::new();
+        form.backend = Backend::Codex;
+        form.fields[0] = "my-codex".into();            // labels[0] = "Name *"
+        form.fields[1] = "https://api.openai.com".into(); // labels[1] = "Base URL"
+        form.fields[2] = "sk-openai-key".into();       // labels[2] = "API Key"
+        form.fields[3] = "gpt-4.1".into();             // labels[3] = "Model"
+        form.fields[4] = "y".into();                    // labels[4] = "Full Auto (y/n)"
+
+        let np = form.to_new_profile();
+
+        assert!(labels[0].contains("Name"));
+        assert_eq!(np.name, "my-codex");
+
+        assert!(labels[1].contains("Base URL"));
+        assert_eq!(np.base_url.as_deref(), Some("https://api.openai.com"));
+
+        assert!(labels[2].contains("Key"));
+        assert_eq!(np.api_key.as_deref(), Some("sk-openai-key"));
+
+        assert!(labels[3].contains("Model"));
+        assert_eq!(np.model.as_deref(), Some("gpt-4.1"));
+
+        assert!(labels[4].contains("Full Auto"));
+        assert_eq!(np.full_auto, Some(true));
+
+        assert_eq!(np.backend, Backend::Codex);
+        assert!(np.description.is_none());
+    }
+
+    /// Codex form must NOT produce API key in model field or vice versa.
+    /// This is the exact regression that the user reported.
+    #[test]
+    fn codex_form_does_not_swap_api_key_and_model() {
+        use crate::config::Backend;
+        let mut form = FormState::new();
+        form.backend = Backend::Codex;
+        form.fields[0] = "test".into();
+        form.fields[1] = "https://clauddy.com/v1".into(); // Base URL
+        form.fields[2] = "sk-secret-key".into();           // API Key
+        form.fields[3] = "gpt-5.3-codex".into();           // Model
+        form.fields[4] = "n".into();                        // Full Auto
+
+        let np = form.to_new_profile();
+
+        // The bug was: model got the API key value, and api_key got the base_url
+        assert_eq!(np.model.as_deref(), Some("gpt-5.3-codex"),
+            "model must be 'gpt-5.3-codex', not an API key");
+        assert_eq!(np.api_key.as_deref(), Some("sk-secret-key"),
+            "api_key must be 'sk-secret-key', not a URL");
+        assert_eq!(np.base_url.as_deref(), Some("https://clauddy.com/v1"),
+            "base_url must be the URL, not something else");
     }
 }

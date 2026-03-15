@@ -60,17 +60,37 @@ fn run_tui() -> Result<()> {
                     }
                     (KeyCode::Down, _) | (KeyCode::Char('j'), _) => app.next(),
                     (KeyCode::Up, _) | (KeyCode::Char('k'), _) => app.prev(),
+                    (KeyCode::Tab, _) => {
+                        let opposite = match app.active_backend {
+                            config::Backend::Claude => config::Backend::Codex,
+                            config::Backend::Codex => config::Backend::Claude,
+                        };
+                        app.switch_backend(opposite);
+                    }
+                    (KeyCode::Char('1'), _) => {
+                        app.switch_backend(config::Backend::Claude);
+                    }
+                    (KeyCode::Char('2'), _) => {
+                        app.switch_backend(config::Backend::Codex);
+                    }
                     (KeyCode::Enter, _) if !app.profiles.is_empty() => {
                         launch::restore_terminal();
-                        let err = launch::exec_claude(&app.profiles[app.selected], false);
+                        let profile = &app.profiles[app.selected];
+                        let err = match profile.backend {
+                            config::Backend::Claude => launch::exec_claude(profile, false),
+                            config::Backend::Codex => launch::exec_codex(profile),
+                        };
                         eprintln!("Error: {err:#}");
                         std::process::exit(1);
                     }
                     (KeyCode::Char('c'), _) if !app.profiles.is_empty() => {
-                        launch::restore_terminal();
-                        let err = launch::exec_claude(&app.profiles[app.selected], true);
-                        eprintln!("Error: {err:#}");
-                        std::process::exit(1);
+                        let profile = &app.profiles[app.selected];
+                        if profile.backend == config::Backend::Claude {
+                            launch::restore_terminal();
+                            let err = launch::exec_claude(profile, true);
+                            eprintln!("Error: {err:#}");
+                            std::process::exit(1);
+                        }
                     }
                     (KeyCode::Char('e'), _) => {
                         launch::restore_terminal();
@@ -90,19 +110,37 @@ fn run_tui() -> Result<()> {
                     }
                     (KeyCode::Char('s'), _) if !app.profiles.is_empty() => {
                         let profile = &mut app.profiles[app.selected];
-                        let old_val = profile.skip_permissions.unwrap_or(false);
-                        let new_val = !old_val;
-                        match config::toggle_skip_permissions(&profile.name, new_val) {
-                            Ok(()) => {
-                                profile.skip_permissions = Some(new_val);
+                        match profile.backend {
+                            config::Backend::Claude => {
+                                let old_val = profile.skip_permissions.unwrap_or(false);
+                                let new_val = !old_val;
+                                match config::toggle_skip_permissions(&profile.name, new_val) {
+                                    Ok(()) => {
+                                        profile.skip_permissions = Some(new_val);
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Warning: toggle failed: {e:#}");
+                                    }
+                                }
                             }
-                            Err(e) => {
-                                eprintln!("Warning: toggle failed: {e:#}");
+                            config::Backend::Codex => {
+                                let old_val = profile.full_auto.unwrap_or(false);
+                                let new_val = !old_val;
+                                match config::toggle_full_auto(&profile.name, new_val) {
+                                    Ok(()) => {
+                                        profile.full_auto = Some(new_val);
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Warning: toggle failed: {e:#}");
+                                    }
+                                }
                             }
                         }
                     }
                     (KeyCode::Char('a'), _) => {
-                        app.mode = AppMode::AddForm(FormState::new());
+                        let mut form = FormState::new();
+                        form.backend = app.active_backend.clone();
+                        app.mode = AppMode::AddForm(form);
                     }
                     _ => {}
                 },
@@ -130,25 +168,7 @@ fn run_tui() -> Result<()> {
                                         continue;
                                     }
                                 }
-                                let desc = form.fields[1].trim().to_string();
-                                let base_url = form.fields[2].trim().to_string();
-                                let api_key = form.fields[3].trim().to_string();
-                                let model = form.fields[4].trim().to_string();
-                                let new_profile = config::NewProfile {
-                                    name,
-                                    description: if desc.is_empty() { None } else { Some(desc) },
-                                    base_url: if base_url.is_empty() {
-                                        None
-                                    } else {
-                                        Some(base_url)
-                                    },
-                                    api_key: if api_key.is_empty() {
-                                        None
-                                    } else {
-                                        Some(api_key)
-                                    },
-                                    model: if model.is_empty() { None } else { Some(model) },
-                                };
+                                let new_profile = form.to_new_profile();
                                 if let Err(e) = config::append_profile(&new_profile) {
                                     form.error = Some(format!("Save failed: {e:#}"));
                                     form.confirming = false;

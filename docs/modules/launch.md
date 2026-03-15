@@ -3,11 +3,13 @@ doc_type: module
 module_name: "launch"
 module_path: "src/launch.rs"
 generated_by: mci-phase-2
+revision: 2
+updated: 2026-03-15
 ---
 
 # launch Module Documentation
 
-> **Purpose**: Handles all process-lifecycle concerns for `cct`: builds the `claude` CLI argument list from a profile, exec-replaces the current process with `claude`, restores terminal state before any exec or editor spawn, and opens `$EDITOR` for config hot-reload.
+> **Purpose**: Handles all process-lifecycle concerns for `cct`: builds CLI argument lists for both Claude and Codex backends, generates Codex config files, exec-replaces the current process, restores terminal state, and opens `$EDITOR` for config hot-reload.
 > **Path**: src/launch.rs
 
 ---
@@ -20,47 +22,77 @@ generated_by: mci-phase-2
 - `pub fn restore_terminal()`
   - Disables crossterm raw mode and emits `LeaveAlternateScreen` to stdout.
   - Returns: `()` (errors from crossterm are silently discarded with `let _ = ...`).
-  - Must be called before any `exec_claude` or `open_editor` invocation to ensure the terminal is returned to cooked mode.
+  - Must be called before any exec or editor invocation to ensure the terminal is returned to cooked mode.
 
-- `pub fn build_args(profile: &Profile) -> Vec<String>`
+- `pub fn build_args(profile: &Profile, with_continue: bool) -> Vec<String>`
   - Pure function with no side effects.
-  - Constructs the ordered CLI argument list for the `claude` binary from a `Profile`.
-  - Argument ordering: `--model <value>` (if `profile.model` is `Some`), then `--dangerously-skip-permissions` (if `profile.skip_permissions` is `Some(true)`), then each element of `profile.extra_args` in order.
+  - Constructs the ordered CLI argument list for the `claude` binary.
+  - Argument ordering: `--model <value>` (if `profile.model` is `Some`), then `--dangerously-skip-permissions` (if `profile.skip_permissions` is `Some(true)`), then `--continue` (if `with_continue` is `true`), then each element of `profile.extra_args` in order.
   - Returns: `Vec<String>` — may be empty if all profile fields are absent or false.
 
-- `pub fn exec_claude(profile: &Profile) -> anyhow::Error`
+- `pub fn build_launch_command(profile: &Profile, with_continue: bool) -> (String, Vec<String>)`
+  - Pure dispatch function; chooses the correct binary and arg builder based on `profile.backend`.
+  - `Backend::Claude` → `("claude", build_args(profile, with_continue))`
+  - `Backend::Codex` → `("codex", build_codex_args(profile))` (ignores `with_continue`)
+  - Used by integration tests to verify dispatch without exec-replacing the process.
+
+- `pub fn exec_claude(profile: &Profile, with_continue: bool) -> anyhow::Error`
   - Injects all key-value pairs from `profile.env` into the current process environment via `env::set_var`.
-  - Calls `build_args(profile)` then exec-replaces the current process with `claude <args>` using `std::os::unix::process::CommandExt::exec`.
+  - Calls `build_args(profile, with_continue)` then exec-replaces the current process with `claude <args>`.
   - **Never returns on success** — the process image is replaced.
-  - Returns: `anyhow::Error` only when `exec` itself fails (e.g., `claude` binary not found on `$PATH`).
+  - Returns: `anyhow::Error` only when `exec` itself fails.
+
+- `pub fn check_codex_installed() -> bool`
+  - Runs `which codex` to test whether the `codex` binary is available in `$PATH`.
+  - Returns `true` if `which` exits with status 0; `false` on non-zero exit or any error.
+
+- `pub fn generate_codex_config(profile: &Profile, codex_home: &Path) -> anyhow::Result<()>`
+  - Writes `<codex_home>/config.toml` with the following content derived from the profile:
+    ```toml
+    model_provider = "custom"
+    model = "<profile.model or gpt-4.1>"
+    [model_providers.custom]
+    name = "<profile.name>"
+    base_url = "<profile.base_url or empty string>"
+    ```
+  - Creates parent directories if they do not exist.
+  - Multiple codex profiles share one config file; it is fully rewritten before each codex launch.
+  - `codex_home` is separated from the function body (testable with a temp dir).
+
+- `pub fn build_codex_args(profile: &Profile) -> Vec<String>`
+  - Pure function with no side effects.
+  - Argument ordering: `--full-auto` (if `profile.full_auto` is `Some(true)`), then each element of `profile.extra_args` in order.
+  - Does NOT include `--model`; the model is passed to codex via `config.toml` (through `CODEX_HOME`).
+
+- `pub fn exec_codex(profile: &Profile) -> anyhow::Error`
+  - Steps performed before exec-replace:
+    1. Checks `codex` binary is installed via `check_codex_installed()`; returns error if not.
+    2. Resolves `codex_home` to `~/.config/cct-tui/codex/` via `dirs::config_dir()`.
+    3. Calls `generate_codex_config(profile, &codex_home)` to write `config.toml`; returns error on failure.
+    4. Sets `CODEX_HOME` environment variable to `codex_home`.
+    5. Injects all key-value pairs from `profile.env` (contains `OPENAI_API_KEY`).
+    6. Exec-replaces with `codex <build_codex_args(profile)>`.
+  - **Never returns on success**.
 
 - `pub fn check_claude_installed() -> bool`
-  - Runs `which <bin>` (or the value of `CCT_CLAUDE_BIN` env var when set) to test whether the
-    target binary is available in `$PATH`.
-  - Returns `true` if `which` exits with status 0; `false` on non-zero exit or any error.
-  - The `CCT_CLAUDE_BIN` override is used exclusively in unit tests (substituting `"true"` or
-    `"nonexistent-binary-xyz-12345"`). Production code reads `"claude"`.
-  - Side effects: spawns a `which` child process; stdout and stderr are suppressed.
+  - Runs `which <bin>` (or the value of `CCT_CLAUDE_BIN` env var when set) to test whether the target binary is available in `$PATH`.
+  - The `CCT_CLAUDE_BIN` override is used exclusively in unit tests.
 
 - `pub fn prompt_install() -> Result<()>`
-  - Must be called **before** `enable_raw_mode` / `EnterAlternateScreen` — it reads from stdin
-    using standard cooked-mode I/O.
+  - Must be called **before** `enable_raw_mode` / `EnterAlternateScreen`.
   - Prints `"Claude CLI not found in PATH."` and prompts `"Install now? [Y/n]"`.
-  - If the user answers `"n"` or `"no"`: prints manual install instructions and calls
-    `std::process::exit(0)`.
-  - Otherwise: runs `curl -fsSL https://claude.ai/install.sh | bash` via `Command::new("bash")`.
-  - On installer success: re-checks via `check_claude_installed()`, then checks
-    `~/.local/bin/claude` as a fallback (installer may not update PATH mid-session).
+  - If user answers `"n"` or `"no"`: prints manual install instructions and calls `std::process::exit(0)`.
+  - Otherwise: runs `curl -fsSL https://claude.ai/install.sh | bash`.
   - Returns `Err` if the installer exits non-zero or if `claude` is still not found after install.
 
 - `pub fn open_editor(path: &Path) -> Result<()>`
-  - Reads `$EDITOR`; falls back to `"vi"` if the variable is unset or empty.
+  - Reads `$EDITOR`; falls back to `"vi"` if unset or empty.
   - Spawns the editor as a child process, blocking until it exits.
-  - Returns: `Ok(())` on clean editor exit; `Err(anyhow::Error)` with context message `"spawn editor \"<editor>\""` if the spawn fails.
+  - Returns: `Ok(())` on clean editor exit; `Err(anyhow::Error)` with context message `"spawn editor \"<editor>\""` if spawn fails.
 
 ### Exported Types
 
-None — all public surface is functions. The module consumes `crate::config::Profile` from the `config` module.
+None — all public surface is functions. The module consumes `crate::config::Profile` and `crate::config::Backend` from the `config` module.
 
 <!-- END:interface -->
 
@@ -69,14 +101,15 @@ None — all public surface is functions. The module consumes `crate::config::Pr
 <!-- BEGIN:dependency_graph -->
 ## 2. Dependency Graph
 
-- **Imports from `crate::config`** → `Profile` struct (fields: `model`, `skip_permissions`, `extra_args`, `env`). The `launch` module is a pure consumer of `Profile`; it does not write to the config layer.
-- **Imports from `std::os::unix::process::CommandExt`** → Provides the `.exec()` method on `std::process::Command`. This trait is Unix-only; the module will not compile on Windows targets.
-- **Imports from `std::process::Command`** → Used to construct both the `claude` subprocess (for exec) and the editor subprocess (for `open_editor`).
-- **Imports from `std::env`** → `env::set_var` (inject profile env vars) and `env::var` (read `$EDITOR`).
+- **Imports from `crate::config`** → `Profile` struct and `Backend` enum. `Backend` is used in `build_launch_command` to dispatch to the correct arg builder.
+- **Imports from `std::os::unix::process::CommandExt`** → Provides the `.exec()` method on `std::process::Command`. Unix-only; the module will not compile on Windows.
+- **Imports from `std::process::Command`** → Used to construct the exec targets and the `which` check.
+- **Imports from `std::env`** → `env::set_var` (inject env vars) and `env::var` (read `$EDITOR`).
+- **Imports from `std::{fs, path::Path, path::PathBuf}`** → Used by `generate_codex_config` to create directories and write the config file.
 - **Imports from `crossterm`** → `terminal::disable_raw_mode` and `execute!(stdout, LeaveAlternateScreen)` for terminal cleanup in `restore_terminal`.
-- **Imports from `anyhow`** → `Context` trait (adds context to `open_editor` errors) and `Result` alias. `exec_claude` returns a bare `anyhow::Error` rather than `Result<_>` because it has no success path.
-- **Imports from `dirs`** → `dirs::home_dir()` in `prompt_install` to check `~/.local/bin/claude` as an install fallback when `which` still fails after the installer runs.
-- **Does NOT depend on**: `app`, `ui`, or any async runtime. The module is synchronous and has no shared mutable state.
+- **Imports from `anyhow`** → `Context` trait and `Result` alias.
+- **Imports from `dirs`** → `dirs::config_dir()` in `prompt_install` (claude fallback) and in `exec_codex` (to resolve `codex_home` path).
+- **Does NOT depend on**: `app`, `ui`, or any async runtime.
 
 <!-- END:dependency_graph -->
 
@@ -85,17 +118,17 @@ None — all public surface is functions. The module consumes `crate::config::Pr
 <!-- BEGIN:state_management -->
 ## 3. State Management
 
-**Type**: Effectively stateless for `build_args` and `open_editor`; **process-mutating** for `exec_claude`.
+- **`build_args` / `build_codex_args`** — Purely functional. Take a `&Profile` reference, perform no I/O, and return a `Vec<String>`. `build_launch_command` is similarly pure; it just dispatches to one of these.
 
-- **`build_args`** — Purely functional. Takes a `&Profile` reference, performs no I/O, allocates a `Vec<String>`, and returns it. Calling it multiple times with the same input produces identical output.
+- **`open_editor`** — Spawns a child process and blocks. Reads `$EDITOR` at call time but retains no state.
 
-- `open_editor` — Spawns a child process and blocks. It reads `$EDITOR` from the environment at call time but does not retain or modify any state. The child's exit status is checked via `.status()` and discarded beyond the `Ok`/`Err` distinction.
+- **`exec_claude`** — Two permanent side effects: (1) env mutation via `env::set_var`; (2) process replacement via `CommandExt::exec()`. Terminal cleanup (`restore_terminal`) must be called by the caller before `exec_claude`.
 
-- **`exec_claude`** — Has two permanent side effects on process-global state:
-  1. **Environment mutation**: calls `env::set_var(k, v)` for every entry in `profile.env`. These changes persist for the lifetime of the process (and are inherited by any forked children). Because `exec` replaces the process image on success, this is acceptable; on failure the caller exits with code 1 (see `main.rs:39`).
-  2. **Process replacement**: `CommandExt::exec()` replaces the current process image with `claude`. There is no return path, no stack unwind, and no destructor invocation on success. The TUI terminal cleanup (`restore_terminal`) must therefore be called by the caller **before** `exec_claude`.
+- **`exec_codex`** — Four side effects before exec: (1) writes `~/.config/cct-tui/codex/config.toml`; (2) sets `CODEX_HOME` env var; (3) sets `OPENAI_API_KEY` from `profile.env`; (4) process replacement. `restore_terminal` must be called before `exec_codex`.
 
-- **`restore_terminal`** — Interacts with global terminal state via crossterm. Errors are intentionally suppressed (`let _ = ...`) to ensure the function is always safe to call even if raw mode was never enabled.
+- **`generate_codex_config`** — File I/O side effect: creates directory and writes config.toml. It is separated from `exec_codex` to allow unit testing against a temp directory without exec-replacing the process.
+
+- **`restore_terminal`** — Interacts with global terminal state. Errors suppressed intentionally.
 
 <!-- END:state_management -->
 
@@ -199,4 +232,4 @@ let args = launch::build_args(&profile);
 ---
 
 **Template Version**: 2.0
-**Last Updated**: 2026-03-10
+**Last Updated**: 2026-03-15 (revision 2 — added check_codex_installed, generate_codex_config, build_codex_args, exec_codex, build_launch_command; updated build_args signature for with_continue)

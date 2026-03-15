@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`cct` is a terminal UI launcher for Claude Code. It reads named profiles from a TOML config file (`~/.config/cc-tui/profiles.toml`), displays them in a ratatui TUI, and exec-replaces the process with `claude <args>` when the user selects one.
+`cct` is a terminal UI launcher for Claude Code and OpenAI Codex. It reads named profiles from a TOML config file (`~/.config/cc-tui/profiles.toml`), displays them in a ratatui TUI organized into Claude/Codex backend tabs, and exec-replaces the process with `claude <args>` or `codex [--full-auto]` when the user selects a profile.
 
 ## Build & Test Commands
 
@@ -32,20 +32,21 @@ The app is five focused modules with no shared mutable state:
 
 | Module | File | Responsibility |
 |--------|------|----------------|
-| `config` | `src/config.rs` | Deserialize `profiles.toml` via serde/toml; write default config on first run; append new profiles with auto-generated env vars; toggle skip_permissions via toml_edit |
-| `app` | `src/app.rs` | Cursor state (`selected` index), navigation (`next`/`prev`), `AppMode` (Normal/AddForm), 5-field `FormState` |
-| `ui` | `src/ui.rs` | ratatui rendering — 35/65 split list+detail panel + footer; inline add-form; masks sensitive env vars; red row style for skip_permissions profiles |
-| `launch` | `src/launch.rs` | Build `claude` CLI args from a profile; `exec()` the process (Unix replace); open `$EDITOR`; check/install claude binary |
-| `cli` | `src/cli.rs` | `cct add` interactive CLI flow — 5 prompts, masked summary, duplicate guard |
+| `config` | `src/config.rs` | Deserialize `profiles.toml`; `Backend` enum; `validate_profiles`; write default config; append new profiles with backend-specific env generation; toggle skip_permissions via toml_edit |
+| `app` | `src/app.rs` | Cursor state, `active_backend`, `filtered_indices()`, `switch_backend()`, `AppMode` (Normal/AddForm), `FormState` with `to_new_profile()` as single source of truth |
+| `ui` | `src/ui.rs` | ratatui rendering — tab bar + 35/65 split filtered list+detail panel + footer; backend-aware `build_form_lines`; masks sensitive env vars |
+| `launch` | `src/launch.rs` | `build_launch_command` dispatch; `exec_claude`/`exec_codex`; `generate_codex_config`; `exec()` process replace; open `$EDITOR`; check/install claude binary |
+| `cli` | `src/cli.rs` | `cct add` interactive CLI flow — 5 prompts, masked summary, duplicate guard (Claude profiles only) |
 
-**Data flow:** `main` checks claude is installed → loads profiles → creates `App` → draw loop → on Enter calls `launch::exec_claude` which injects env vars and exec-replaces via `std::os::unix::process::CommandExt::exec`.
+**Data flow:** `main` checks backend binaries → loads + validates profiles → creates `App` → draw loop → on Enter dispatches to `launch::exec_claude` or `launch::exec_codex` based on `profile.backend`.
 
 **Key design choices:**
-- `exec` (not `spawn`) is used so `claude` inherits the terminal cleanly; there is no return path on success.
+- `exec` (not `spawn`) is used so the target CLI inherits the terminal cleanly; there is no return path on success.
 - `ui::mask_value` redacts any env key containing `TOKEN`, `KEY`, or `SECRET`.
 - Config hot-reload on `e`: editor opens, then profiles are re-parsed in-place without restart.
-- Profile add (CLI `cct add` or TUI `a` key) auto-generates a `[profiles.env]` block when `base_url`, `api_key`, or `model` are provided.
-- `s` key toggles `skip_permissions` on the selected profile; persisted via `toml_edit` to preserve comments.
+- `FormState::to_new_profile()` is the single source of truth for form-field-index → semantic mapping per backend.
+- Codex launch: `generate_codex_config` writes `~/.config/cct-tui/codex/config.toml` from profile fields; `CODEX_HOME` is set before exec.
+- `s` key toggles `skip_permissions` on the selected Claude profile; persisted via `toml_edit` to preserve comments.
 - On startup, if `claude` is missing, `prompt_install()` offers to run the official installer before entering raw mode.
 
 ## Config File Format
@@ -95,14 +96,15 @@ CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
 Detailed module docs are in `docs/modules/`:
 
 - [Module Index](docs/modules/index.md) — cross-module dependency graph and global interface index
-- [config](docs/modules/config.md) — TOML deserialization, config path, default bootstrap, toggle_skip_permissions
-- [app](docs/modules/app.md) — cursor state and circular navigation
-- [ui](docs/modules/ui.md) — ratatui rendering and sensitive-value masking
-- [launch](docs/modules/launch.md) — arg building, exec-replace, editor open, autoinstall check
+- [config](docs/modules/config.md) — TOML deserialization, Backend enum, validate_profiles, config path, default bootstrap, toggle_skip_permissions
+- [app](docs/modules/app.md) — cursor state, backend-filtered navigation, FormState.to_new_profile (single source of truth)
+- [ui](docs/modules/ui.md) — ratatui rendering, tab bar, backend-aware form labels, sensitive-value masking
+- [launch](docs/modules/launch.md) — arg building, exec-replace for Claude and Codex, generate_codex_config, editor open, autoinstall check
 
 Other docs:
 - [install-script reference](docs/references/install-script.md) — curl|bash installer functions and test coverage
 - [BATS stubbing lesson](docs/lessons/bats-shell-function-stubbing.md) — export -f pattern for shell test isolation
+- [Form field index single source of truth](docs/lessons/form-field-index-single-source-of-truth.md) — why polymorphic field buffers need a single mapping function
 
 See also: [ARCHITECTURE.md](ARCHITECTURE.md) for the system-level overview.
 <!-- END:module-docs -->

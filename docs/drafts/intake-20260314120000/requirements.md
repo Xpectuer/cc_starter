@@ -4,8 +4,8 @@ doc_type: proc
 brief: "Add OpenAI Codex CLI backend support to cct TUI launcher"
 confidence: speculative
 created: 2026-03-14
-updated: 2026-03-14
-revision: 1
+updated: 2026-03-15
+revision: 2
 source_skill: intake
 ---
 
@@ -22,6 +22,19 @@ cct becomes a dual-backend TUI launcher. Users can create profiles for both `cla
 ## 3. Constraints
 - **Tech stack**: Rust, ratatui, serde/toml, toml_edit — no new major dependencies
 - **Hard boundaries**: Single config file (`profiles.toml`); each profile must specify its backend; backward compatibility for existing claude-only configs (default backend = "claude" if omitted)
+- **Codex launch mechanism**:
+  1. cct 在启动 codex profile 前，自动生成 `~/.config/cct-tui/codex/config.toml`（内容从 profile 字段注入）
+  2. 设置环境变量 `CODEX_HOME=~/.config/cct-tui/codex/` 和 `OPENAI_API_KEY=<profile.env>`
+  3. exec-replace 为 `codex [--full-auto]`
+  4. 多个 codex profile 共用同一个 config.toml，启动前重写
+- **Codex config.toml format**:
+  ```toml
+  model_provider = "custom"
+  model = "<from profile.model>"
+  [model_providers.custom]
+  name = "<from profile.name>"
+  base_url = "<from profile.base_url>"
+  ```
 
 ## 4. Scope
 ### In Scope
@@ -31,8 +44,8 @@ cct becomes a dual-backend TUI launcher. Users can create profiles for both `cla
 - Codex-specific detail panel showing codex-relevant fields
 - Add-form adaptation for codex profiles (different field set)
 - `full_auto` boolean field for codex profiles → maps to `--full-auto` flag
-- `launch::exec_codex()` — build codex CLI args and exec-replace
-- Codex env vars in `[profiles.env]` (e.g., `OPENAI_API_KEY`)
+- `launch::exec_codex()` — generate codex config.toml, set `CODEX_HOME` + `OPENAI_API_KEY`, build codex CLI args and exec-replace
+- Codex env vars: `OPENAI_API_KEY` from `[profiles.env]`, `CODEX_HOME` auto-set by cct
 - Unit tests for config parsing (codex profile deserialization, field validation)
 - Unit tests for codex arg building
 - Integration/E2E tests for the full flow (create codex profile → display in TUI → launch)
@@ -49,7 +62,9 @@ cct becomes a dual-backend TUI launcher. Users can create profiles for both `cla
 - [ ] TUI shows tab/group separation between claude and codex profiles
 - [ ] Selecting a codex profile and pressing Enter exec-replaces with `codex <args>`
 - [ ] `full_auto = true` in a codex profile produces `codex --full-auto` on launch
-- [ ] Codex env vars from `[profiles.env]` are injected into the exec environment
+- [ ] Codex config.toml is auto-generated at `~/.config/cct-tui/codex/config.toml` before launch
+- [ ] `CODEX_HOME` env var is set to `~/.config/cct-tui/codex/` during codex exec
+- [ ] Codex env vars (`OPENAI_API_KEY`) from `[profiles.env]` are injected into the exec environment
 - [ ] Unit tests pass for codex config parsing and arg building
 - [ ] Integration tests pass for the create-display-launch flow
 - [ ] Existing claude-only profiles continue to work without modification

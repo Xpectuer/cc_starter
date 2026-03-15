@@ -9,7 +9,7 @@ generated_by: mci-phase-1
 
 ## Project Overview
 
-- **Problem Domain**: `cct` is a terminal UI launcher for Claude Code. It lets users define named "profiles" (different Claude model configs, API keys, extra flags) in a single TOML file and select them via an interactive ratatui TUI, replacing the need to manually construct long `claude ...` command lines.
+- **Problem Domain**: `cct` is a terminal UI launcher for Claude Code and OpenAI Codex. It lets users define named "profiles" (different model configs, API keys, extra flags) for both `claude` and `codex` CLIs in a single TOML file, and select them via an interactive ratatui TUI. Profiles are organized into two backend tabs (Claude / Codex), and the selected profile is launched via Unix exec-replace.
 - **Primary Users**: Individual developers who run Claude Code locally across multiple configurations (e.g., different models, API providers, permission modes).
 
 ## Tech Stack
@@ -27,23 +27,23 @@ generated_by: mci-phase-1
 
 ## Architecture Pattern
 
-**Flat single-binary CLI with 4 focused modules** — no shared mutable global state. The architecture is closer to a classic Unix filter than to a server application:
+**Flat single-binary CLI with 5 focused modules** — no shared mutable global state. The architecture is closer to a classic Unix filter than to a server application:
 
 ```
-Config (TOML) → App (cursor state) → UI (ratatui draw loop) → Launch (exec-replace)
+Config (TOML) → App (cursor state + backend filter) → UI (ratatui draw loop) → Launch (exec-replace)
 ```
 
-Each module has no circular dependency; `launch` and `ui` both depend on `config::Profile` but not on each other.
+Each module has no circular dependency. `launch` dispatches to either `exec_claude` or `exec_codex` based on `profile.backend`. `ui` uses `app.filtered_indices()` to render only the profiles matching `app.active_backend`.
 
 ## Core Modules (First-level)
 
 | Module | File | Responsibility |
 |--------|------|----------------|
-| `config` | `src/config.rs` | Deserialize `profiles.toml` via serde/toml; write default config on first run; append new profiles with auto-generated `[profiles.env]` |
-| `app` | `src/app.rs` | Cursor state (`selected` index), list navigation (`next`/`prev`), `AppMode` (Normal/AddForm), 5-field `FormState` for inline add form |
-| `ui` | `src/ui.rs` | ratatui rendering — 35/65 split list+detail/form panel + footer; masks sensitive env vars; `AppMode`-dispatched rendering |
-| `launch` | `src/launch.rs` | Build `claude` CLI args from a profile; `exec()` the process (Unix process replace); open `$EDITOR` |
-| `cli` | `src/cli.rs` | `cct add` interactive CLI subcommand — 5 prompts (name, description, base\_url, api\_key, model), masked summary, duplicate guard |
+| `config` | `src/config.rs` | Deserialize `profiles.toml` via serde/toml; `Backend` enum; `validate_profiles`; write default config on first run; append new profiles with backend-specific env generation |
+| `app` | `src/app.rs` | Cursor state (`selected`), `active_backend`, `filtered_indices()`, `switch_backend()`, `AppMode` (Normal/AddForm), `FormState` with `to_new_profile()` as single source of truth for field-index mapping |
+| `ui` | `src/ui.rs` | ratatui rendering — tab bar + 35/65 split filtered list + detail/form panel + footer; `build_form_lines` uses `field_labels(backend)` dynamically; masks sensitive env vars |
+| `launch` | `src/launch.rs` | `build_launch_command` dispatch; `exec_claude`/`exec_codex`; `generate_codex_config` writes `~/.config/cct-tui/codex/config.toml`; `exec()` process replacement; open `$EDITOR` |
+| `cli` | `src/cli.rs` | `cct add` interactive CLI subcommand — 5 prompts, masked summary, duplicate guard; creates Claude profiles only |
 
 ## Critical Path
 
@@ -64,28 +64,46 @@ src/main.rs (entry point)
       event::read()                    # block on keypress
 ```
 
-### Main Use Case — Launch Profile
+### Main Use Case — Launch Claude Profile
 ```
-User presses [Enter] (mode = Normal)
+User presses [Enter] (mode = Normal, active_backend = Claude)
   → launch::restore_terminal()        # disable raw mode, LeaveAlternateScreen
-  → launch::exec_claude(&profile)
+  → launch::exec_claude(&profile, with_continue=false)
       → env::set_var(k, v) for each profile.env entry
       → launch::build_args(profile)   # --model, --dangerously-skip-permissions, extra_args
       → Command::new("claude").args(...).exec()  # Unix exec — process replaced, no return
 ```
 
+### Main Use Case — Launch Codex Profile
+```
+User presses [Enter] (mode = Normal, active_backend = Codex)
+  → launch::restore_terminal()
+  → launch::exec_codex(&profile)
+      → check_codex_installed()       # `which codex` — error if not found
+      → generate_codex_config(&profile, codex_home)
+          → writes ~/.config/cct-tui/codex/config.toml with model, base_url, name
+      → env::set_var("CODEX_HOME", codex_home)
+      → env::set_var(k, v) for each profile.env entry (OPENAI_API_KEY)
+      → launch::build_codex_args(profile)  # --full-auto, extra_args (no --model)
+      → Command::new("codex").args(...).exec()  # Unix exec — process replaced
+```
+
 ### Add Profile — TUI Form (key `a`)
 ```
 User presses [a] (mode = Normal)
-  → app.mode = AppMode::AddForm(FormState::new())
-  → TUI renders 5-field form (Name *, Description, Base URL, API Key, Model)
+  → app.mode = AppMode::AddForm(FormState::new() with backend = active_backend)
+  → TUI renders 5-field form:
+      Claude: Name *, Description, Base URL, API Key, Model
+      Codex:  Name *, Base URL, API Key, Model, Full Auto (y/n)
   → User fills fields (Tab/↑↓ navigate, Backspace edits)
   → User presses [Enter] on last field → form.confirming = true
   → TUI shows confirmation summary (API Key masked via mask_value)
   → User presses [y]
       → config::profile_name_exists(name) guard
-      → config::append_profile(&NewProfile { name, description, base_url, api_key, model })
-          → writes [[profiles]] block + [profiles.env] (if any env field non-empty)
+      → form.to_new_profile()         # single source of truth for field-index mapping
+      → config::append_profile(&new_profile)
+          → Claude: writes [[profiles]] block + [profiles.env] (ANTHROPIC_* vars)
+          → Codex: writes [[profiles]] block with base_url + full_auto fields + [profiles.env] (OPENAI_API_KEY only)
       → config::load_profiles()       # reload to pick up new profile
       → app.selected = index of new profile
       → app.mode = AppMode::Normal
@@ -133,8 +151,11 @@ User presses [e]
 | `CCT_CONFIG` env var | Override config file path (used by integration tests) |
 | `CCT_CLAUDE_BIN` env var | Override binary name used by `check_claude_installed` (used by unit tests to substitute `"true"` or a nonexistent binary) |
 | `$EDITOR` env var | Editor opened on `e` key; falls back to `vi` |
-| `profiles[].model` | Adds `--model <value>` to `claude` invocation |
-| `profiles[].skip_permissions = true` | Adds `--dangerously-skip-permissions` to `claude` invocation |
+| `profiles[].backend` | `"claude"` (default) or `"codex"` — determines which binary is exec'd |
+| `profiles[].base_url` | First-class profile field. Claude: becomes `ANTHROPIC_BASE_URL` in env. Codex: written to `config.toml` via `generate_codex_config`. |
+| `profiles[].full_auto = true` | Codex-only. Adds `--full-auto` to codex invocation. |
+| `profiles[].model` | Claude: adds `--model <value>`. Codex: written to `config.toml` (not passed as CLI arg). |
+| `profiles[].skip_permissions = true` | Claude-only. Adds `--dangerously-skip-permissions` to `claude` invocation. |
 | `profiles[].extra_args = [...]` | Appended verbatim after other flags |
 | `profiles[].env.*` | Injected as process environment variables before exec |
 | Add-flow `base_url` → `ANTHROPIC_BASE_URL` | Auto-written to `[profiles.env]` by `append_profile` |
@@ -151,17 +172,23 @@ graph TB
     User["Developer"]
     CCT["cct TUI (ratatui terminal)"]
     ProfilesFile["~/.config/cc-tui/profiles.toml (TOML config)"]
+    CodexConfig["~/.config/cct-tui/codex/config.toml (auto-generated)"]
     Claude["claude binary (Claude Code CLI)"]
+    Codex["codex binary (OpenAI Codex CLI)"]
     Editor["$EDITOR (vi / nvim / etc.)"]
     AnthropicAPI["Anthropic API (or custom base URL)"]
+    OpenAIAPI["OpenAI API (or custom base URL)"]
 
     User -->|"navigate / launch / edit"| CCT
     CCT -->|"read on startup + hot-reload"| ProfilesFile
     CCT -->|"exec-replace (Unix exec)"| Claude
+    CCT -->|"exec-replace (Unix exec)"| Codex
     CCT -->|"spawn on e key"| Editor
     Editor -->|"writes"| ProfilesFile
     Claude -->|"HTTPS"| AnthropicAPI
     Claude -->|"inherits env vars (ANTHROPIC_AUTH_TOKEN, etc.)"| AnthropicAPI
+    Codex -->|"HTTPS"| OpenAIAPI
+    Codex -->|"inherits OPENAI_API_KEY + reads CODEX_HOME/config.toml"| OpenAIAPI
 ```
 
 ## Test Infrastructure
@@ -175,15 +202,18 @@ graph TB
 
 ## Key Design Decisions
 
-- **`exec` not `spawn`**: `launch::exec_claude` uses Unix `exec` so `claude` inherits the terminal cleanly; there is no return path on success.
+- **`exec` not `spawn`**: Both `exec_claude` and `exec_codex` use Unix `exec` so the target CLI inherits the terminal cleanly; there is no return path on success.
 - **`ui::mask_value`**: Redacts any env key containing `TOKEN`, `KEY`, or `SECRET` in the detail panel and add-form confirmation.
 - **Config hot-reload on `e`**: Editor opens, then profiles are re-parsed in-place without process restart.
-- **No shared mutable state**: Each module is self-contained; `App` owns `Vec<Profile>` and is the single source of truth for cursor position and UI mode.
-- **Auto-env-var generation on add**: When `base_url`, `api_key`, or `model` are provided in the add flow, `config::append_profile` generates a complete `[profiles.env]` block covering all Anthropic env var names needed for third-party endpoints, avoiding manual configuration errors.
-- **Dual add surface (CLI + TUI)**: `cct add` (CLI) and `a` key (TUI) both funnel through `config::append_profile`, keeping the TOML serialization logic in one place.
-- **Autoinstall on startup**: `main` calls `launch::check_claude_installed()` before entering the TUI. If `claude` is absent, `prompt_install()` offers to run `curl -fsSL https://claude.ai/install.sh | bash` interactively. This must happen before raw mode is enabled.
+- **No shared mutable state**: Each module is self-contained; `App` owns `Vec<Profile>` and is the single source of truth for cursor position, active backend, and UI mode.
+- **Backend-filtered navigation**: `App::filtered_indices()` returns only profiles matching `active_backend`. `next()`/`prev()` navigate within this subset. `switch_backend()` resets `selected` to 0.
+- **`FormState::to_new_profile()` as single source of truth**: All reads from the `fields` array that produce a `NewProfile` go through this one method. This prevents label-to-mapping drift when backends use different field-index conventions.
+- **`generate_codex_config` for codex launch**: Before exec-replacing with `codex`, `cct` writes `~/.config/cct-tui/codex/config.toml` from the selected profile's fields. Multiple codex profiles share one config file; it is fully rewritten each launch. `CODEX_HOME` is set to point codex at this directory.
+- **Auto-env-var generation on add**: Claude profiles generate a complete `[profiles.env]` block. Codex profiles only generate `OPENAI_API_KEY` in env (model and base_url go to `config.toml` instead).
 - **`toml_edit` for surgical writes**: `config::toggle_skip_permissions` uses `toml_edit::DocumentMut` rather than re-serializing the entire config, so user comments and key ordering are preserved on every toggle.
-- **`skip_permissions` red visual indicator**: Profile list rows are rendered in `Color::Red` when `skip_permissions = true`, providing an immediate danger signal in the TUI without requiring the user to open the detail panel.
-- **`install.sh` curl|bash installer**: A standalone Bash script at the repo root downloads the latest GitHub Release tarball, verifies it with `tar -tzf`, retries up to 3 times on download failure, and installs to `~/.local/bin`. Does not require root.
+- **`skip_permissions` red visual indicator**: Profile list rows are rendered in `Color::Red` when `skip_permissions = true`, providing an immediate danger signal in the TUI.
+- **Dual add surface (CLI + TUI)**: `cct add` (CLI) and `a` key (TUI) both funnel through `config::append_profile`. The CLI always creates Claude profiles; the TUI uses `active_backend`.
+- **Autoinstall on startup**: `main` calls `launch::check_claude_installed()` before entering the TUI. If `claude` is absent, `prompt_install()` offers to run the official installer interactively before raw mode is enabled.
+- **`install.sh` curl|bash installer**: A standalone Bash script downloads the latest GitHub Release tarball, verifies it with `tar -tzf`, retries up to 3 times on download failure, and installs to `~/.local/bin`. Does not require root.
 
 <!-- END:architecture -->
