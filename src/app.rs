@@ -66,8 +66,16 @@ impl FormState {
                 NewProfile {
                     name,
                     description: if desc.is_empty() { None } else { Some(desc) },
-                    base_url: if base_url.is_empty() { None } else { Some(base_url) },
-                    api_key: if api_key.is_empty() { None } else { Some(api_key) },
+                    base_url: if base_url.is_empty() {
+                        None
+                    } else {
+                        Some(base_url)
+                    },
+                    api_key: if api_key.is_empty() {
+                        None
+                    } else {
+                        Some(api_key)
+                    },
                     model: if model.is_empty() { None } else { Some(model) },
                     backend: Backend::Claude,
                     full_auto: None,
@@ -82,8 +90,16 @@ impl FormState {
                 NewProfile {
                     name,
                     description: None,
-                    base_url: if base_url.is_empty() { None } else { Some(base_url) },
-                    api_key: if api_key.is_empty() { None } else { Some(api_key) },
+                    base_url: if base_url.is_empty() {
+                        None
+                    } else {
+                        Some(base_url)
+                    },
+                    api_key: if api_key.is_empty() {
+                        None
+                    } else {
+                        Some(api_key)
+                    },
                     model: if model.is_empty() { None } else { Some(model) },
                     backend: Backend::Codex,
                     full_auto: Some(full_auto),
@@ -294,10 +310,16 @@ mod tests {
     fn field_labels_returns_backend_specific_labels() {
         use crate::config::Backend;
         let claude_labels = field_labels(&Backend::Claude);
-        assert_eq!(claude_labels, ["Name *", "Description", "Base URL", "API Key", "Model"]);
+        assert_eq!(
+            claude_labels,
+            ["Name *", "Description", "Base URL", "API Key", "Model"]
+        );
 
         let codex_labels = field_labels(&Backend::Codex);
-        assert_eq!(codex_labels, ["Name *", "Base URL", "API Key", "Model", "Full Auto (y/n)"]);
+        assert_eq!(
+            codex_labels,
+            ["Name *", "Base URL", "API Key", "Model", "Full Auto (y/n)"]
+        );
     }
 
     #[test]
@@ -337,11 +359,11 @@ mod tests {
         // Fill fields with unique sentinel values matching the label semantics
         let mut form = FormState::new();
         form.backend = Backend::Claude;
-        form.fields[0] = "my-profile".into();      // labels[0] = "Name *"
-        form.fields[1] = "A description".into();    // labels[1] = "Description"
+        form.fields[0] = "my-profile".into(); // labels[0] = "Name *"
+        form.fields[1] = "A description".into(); // labels[1] = "Description"
         form.fields[2] = "https://example.com".into(); // labels[2] = "Base URL"
-        form.fields[3] = "sk-secret-123".into();    // labels[3] = "API Key"
-        form.fields[4] = "claude-opus".into();       // labels[4] = "Model"
+        form.fields[3] = "sk-secret-123".into(); // labels[3] = "API Key"
+        form.fields[4] = "claude-opus".into(); // labels[4] = "Model"
 
         let np = form.to_new_profile();
 
@@ -372,11 +394,11 @@ mod tests {
 
         let mut form = FormState::new();
         form.backend = Backend::Codex;
-        form.fields[0] = "my-codex".into();            // labels[0] = "Name *"
+        form.fields[0] = "my-codex".into(); // labels[0] = "Name *"
         form.fields[1] = "https://api.openai.com".into(); // labels[1] = "Base URL"
-        form.fields[2] = "sk-openai-key".into();       // labels[2] = "API Key"
-        form.fields[3] = "gpt-4.1".into();             // labels[3] = "Model"
-        form.fields[4] = "y".into();                    // labels[4] = "Full Auto (y/n)"
+        form.fields[2] = "sk-openai-key".into(); // labels[2] = "API Key"
+        form.fields[3] = "gpt-4.1".into(); // labels[3] = "Model"
+        form.fields[4] = "y".into(); // labels[4] = "Full Auto (y/n)"
 
         let np = form.to_new_profile();
 
@@ -408,18 +430,27 @@ mod tests {
         form.backend = Backend::Codex;
         form.fields[0] = "test".into();
         form.fields[1] = "https://clauddy.com/v1".into(); // Base URL
-        form.fields[2] = "sk-secret-key".into();           // API Key
-        form.fields[3] = "gpt-5.3-codex".into();           // Model
-        form.fields[4] = "n".into();                        // Full Auto
+        form.fields[2] = "sk-secret-key".into(); // API Key
+        form.fields[3] = "gpt-5.3-codex".into(); // Model
+        form.fields[4] = "n".into(); // Full Auto
 
         let np = form.to_new_profile();
 
         // The bug was: model got the API key value, and api_key got the base_url
-        assert_eq!(np.model.as_deref(), Some("gpt-5.3-codex"),
-            "model must be 'gpt-5.3-codex', not an API key");
-        assert_eq!(np.api_key.as_deref(), Some("sk-secret-key"),
-            "api_key must be 'sk-secret-key', not a URL");
-        assert_eq!(np.base_url.as_deref(), Some("https://clauddy.com/v1"),
-            "base_url must be the URL, not something else");
+        assert_eq!(
+            np.model.as_deref(),
+            Some("gpt-5.3-codex"),
+            "model must be 'gpt-5.3-codex', not an API key"
+        );
+        assert_eq!(
+            np.api_key.as_deref(),
+            Some("sk-secret-key"),
+            "api_key must be 'sk-secret-key', not a URL"
+        );
+        assert_eq!(
+            np.base_url.as_deref(),
+            Some("https://clauddy.com/v1"),
+            "base_url must be the URL, not something else"
+        );
     }
 }

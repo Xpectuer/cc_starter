@@ -1,7 +1,12 @@
 use crate::config::Profile;
 use anyhow::{Context, Result};
 use crossterm::{execute, terminal::LeaveAlternateScreen};
-use std::{env, fs, io, os::unix::process::CommandExt, path::{Path, PathBuf}, process::Command};
+use std::{
+    env, fs, io,
+    os::unix::process::CommandExt,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 /// Restore terminal to cooked mode. Must be called before exec or editor spawn.
 pub fn restore_terminal() {
@@ -319,7 +324,13 @@ mod tests {
 
     #[test]
     fn build_codex_args_full_auto_and_extra() {
-        let p = codex_profile("test", None, None, Some(true), Some(vec!["--quiet", "--json"]));
+        let p = codex_profile(
+            "test",
+            None,
+            None,
+            Some(true),
+            Some(vec!["--quiet", "--json"]),
+        );
         assert_eq!(
             build_codex_args(&p),
             vec!["--full-auto", "--quiet", "--json"]
@@ -355,7 +366,12 @@ mod tests {
         assert_eq!(bin, "claude");
         assert_eq!(
             args,
-            vec!["--model", "opus", "--dangerously-skip-permissions", "--verbose"]
+            vec![
+                "--model",
+                "opus",
+                "--dangerously-skip-permissions",
+                "--verbose"
+            ]
         );
     }
 

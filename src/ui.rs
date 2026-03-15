@@ -32,14 +32,26 @@ pub fn build_tab_bar(active: &Backend) -> Vec<Line<'static>> {
 
     let claude_span = ratatui::text::Span::styled(
         claude_label,
-        if *active == Backend::Claude { active_style } else { inactive_style },
+        if *active == Backend::Claude {
+            active_style
+        } else {
+            inactive_style
+        },
     );
     let codex_span = ratatui::text::Span::styled(
         codex_label,
-        if *active == Backend::Codex { active_style } else { inactive_style },
+        if *active == Backend::Codex {
+            active_style
+        } else {
+            inactive_style
+        },
     );
 
-    vec![Line::from(vec![claude_span, ratatui::text::Span::raw("  "), codex_span])]
+    vec![Line::from(vec![
+        claude_span,
+        ratatui::text::Span::raw("  "),
+        codex_span,
+    ])]
 }
 
 pub fn draw(app: &App, frame: &mut Frame) {
@@ -69,7 +81,9 @@ pub fn draw(app: &App, frame: &mut Frame) {
     // --- Profile list (filtered by active_backend) ---
     let filtered = app.filtered_indices();
     let items: Vec<ListItem> = if filtered.is_empty() {
-        vec![ListItem::new("No profiles. Press 'a' to add or 'e' to edit config.")]
+        vec![ListItem::new(
+            "No profiles. Press 'a' to add or 'e' to edit config.",
+        )]
     } else {
         filtered
             .iter()
@@ -87,9 +101,7 @@ pub fn draw(app: &App, frame: &mut Frame) {
                     Backend::Codex if p.full_auto.unwrap_or(false) => {
                         item.style(Style::default().fg(Color::Yellow))
                     }
-                    Backend::Codex => {
-                        item.style(Style::default().fg(Color::White))
-                    }
+                    Backend::Codex => item.style(Style::default().fg(Color::White)),
                     _ => item,
                 }
             })
@@ -99,7 +111,10 @@ pub fn draw(app: &App, frame: &mut Frame) {
     // Map app.selected (global index) to position within filtered list
     let mut list_state = ListState::default();
     if !filtered.is_empty() {
-        let pos = filtered.iter().position(|&i| i == app.selected).unwrap_or(0);
+        let pos = filtered
+            .iter()
+            .position(|&i| i == app.selected)
+            .unwrap_or(0);
         list_state.select(Some(pos));
     }
 
@@ -224,7 +239,11 @@ fn build_form_lines(form: &FormState) -> Vec<Line<'static>> {
             } else {
                 val.to_string()
             };
-            lines.push(Line::from(format!("  {:<14} {}", format!("{}:", label.trim_end_matches(" *")), display)));
+            lines.push(Line::from(format!(
+                "  {:<14} {}",
+                format!("{}:", label.trim_end_matches(" *")),
+                display
+            )));
         }
     } else {
         for (i, label) in labels.iter().enumerate() {
@@ -382,7 +401,10 @@ mod tests {
             " [Tab/1/2] Backend  [↑↓/jk] Navigate  [Enter] Launch  [s] Full-auto  [a] Add  [e] Edit config  [q] Quit";
         assert!(codex_footer.contains("[a] Add"));
         assert!(codex_footer.contains("[s] Full-auto"));
-        assert!(!codex_footer.contains("[c] Resume"), "Codex footer should not show Resume");
+        assert!(
+            !codex_footer.contains("[c] Resume"),
+            "Codex footer should not show Resume"
+        );
     }
 
     #[test]
@@ -391,15 +413,35 @@ mod tests {
 
         // Claude active
         let lines = build_tab_bar(&Backend::Claude);
-        let text: String = lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("");
-        assert!(text.contains("[Claude]"), "Expected [Claude] in tab bar, got: {text}");
-        assert!(text.contains("[Codex]"), "Expected [Codex] in tab bar, got: {text}");
+        let text: String = lines
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(
+            text.contains("[Claude]"),
+            "Expected [Claude] in tab bar, got: {text}"
+        );
+        assert!(
+            text.contains("[Codex]"),
+            "Expected [Codex] in tab bar, got: {text}"
+        );
 
         // Codex active
         let lines = build_tab_bar(&Backend::Codex);
-        let text: String = lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("");
-        assert!(text.contains("[Claude]"), "Expected [Claude] in tab bar, got: {text}");
-        assert!(text.contains("[Codex]"), "Expected [Codex] in tab bar, got: {text}");
+        let text: String = lines
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(
+            text.contains("[Claude]"),
+            "Expected [Claude] in tab bar, got: {text}"
+        );
+        assert!(
+            text.contains("[Codex]"),
+            "Expected [Codex] in tab bar, got: {text}"
+        );
     }
 
     #[test]
@@ -419,7 +461,11 @@ mod tests {
         };
 
         let lines = build_detail(&codex_profile);
-        let joined: String = lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        let joined: String = lines
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
 
         // Should show full_auto instead of skip_permissions
         assert!(
@@ -445,7 +491,11 @@ mod tests {
         };
 
         let lines = build_detail(&claude_profile);
-        let joined: String = lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        let joined: String = lines
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(
             joined.contains("skip_permissions:"),
             "Expected 'skip_permissions:' in claude detail, got:\n{joined}"
@@ -501,13 +551,26 @@ mod tests {
         form.fields[0] = "test".into();
 
         let lines = build_form_lines(&form);
-        let joined: String = lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        let joined: String = lines
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
 
         // Must contain codex-specific labels
-        assert!(joined.contains("Base URL"), "Codex form must show 'Base URL' label");
-        assert!(joined.contains("Full Auto"), "Codex form must show 'Full Auto' label");
+        assert!(
+            joined.contains("Base URL"),
+            "Codex form must show 'Base URL' label"
+        );
+        assert!(
+            joined.contains("Full Auto"),
+            "Codex form must show 'Full Auto' label"
+        );
         // Must NOT contain claude-only label "Description"
-        assert!(!joined.contains("Description"), "Codex form must NOT show 'Description' label");
+        assert!(
+            !joined.contains("Description"),
+            "Codex form must NOT show 'Description' label"
+        );
     }
 
     /// Codex confirmation view must show codex labels and field values in correct positions.
@@ -519,31 +582,66 @@ mod tests {
         form.confirming = true;
         form.fields[0] = "my-codex".into();
         form.fields[1] = "https://api.openai.com".into(); // Base URL
-        form.fields[2] = "sk-openai-key".into();          // API Key
-        form.fields[3] = "gpt-5.3".into();                // Model
-        form.fields[4] = "y".into();                       // Full Auto
+        form.fields[2] = "sk-openai-key".into(); // API Key
+        form.fields[3] = "gpt-5.3".into(); // Model
+        form.fields[4] = "y".into(); // Full Auto
 
         let lines = build_form_lines(&form);
-        let joined: String = lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        let joined: String = lines
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
 
         // Labels must be codex-specific
-        assert!(joined.contains("Base URL"), "Confirm must show 'Base URL' label");
+        assert!(
+            joined.contains("Base URL"),
+            "Confirm must show 'Base URL' label"
+        );
         assert!(joined.contains("Model"), "Confirm must show 'Model' label");
-        assert!(joined.contains("Full Auto"), "Confirm must show 'Full Auto' label");
-        assert!(!joined.contains("Description"), "Confirm must NOT show 'Description' for codex");
+        assert!(
+            joined.contains("Full Auto"),
+            "Confirm must show 'Full Auto' label"
+        );
+        assert!(
+            !joined.contains("Description"),
+            "Confirm must NOT show 'Description' for codex"
+        );
 
         // Values must appear next to correct labels (Base URL line has the URL, not the key)
-        let base_url_line = lines.iter().map(|l| l.to_string()).find(|l| l.contains("Base URL")).unwrap();
-        assert!(base_url_line.contains("https://api.openai.com"),
-            "Base URL line must contain the URL value, got: {base_url_line}");
+        let base_url_line = lines
+            .iter()
+            .map(|l| l.to_string())
+            .find(|l| l.contains("Base URL"))
+            .unwrap();
+        assert!(
+            base_url_line.contains("https://api.openai.com"),
+            "Base URL line must contain the URL value, got: {base_url_line}"
+        );
 
-        let model_line = lines.iter().map(|l| l.to_string()).find(|l| l.contains("Model")).unwrap();
-        assert!(model_line.contains("gpt-5.3"),
-            "Model line must contain model value, got: {model_line}");
+        let model_line = lines
+            .iter()
+            .map(|l| l.to_string())
+            .find(|l| l.contains("Model"))
+            .unwrap();
+        assert!(
+            model_line.contains("gpt-5.3"),
+            "Model line must contain model value, got: {model_line}"
+        );
 
         // API Key must be masked
-        let key_line = lines.iter().map(|l| l.to_string()).find(|l| l.contains("Key")).unwrap();
-        assert!(key_line.contains("***"), "API Key must be masked in confirmation");
-        assert!(!key_line.contains("sk-openai-key"), "API Key must NOT appear in cleartext");
+        let key_line = lines
+            .iter()
+            .map(|l| l.to_string())
+            .find(|l| l.contains("Key"))
+            .unwrap();
+        assert!(
+            key_line.contains("***"),
+            "API Key must be masked in confirmation"
+        );
+        assert!(
+            !key_line.contains("sk-openai-key"),
+            "API Key must NOT appear in cleartext"
+        );
     }
 }

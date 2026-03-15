@@ -708,7 +708,11 @@ base_url = "https://api.example.com/v1"
     fn toggle_full_auto_not_found() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("profiles.toml");
-        std::fs::write(&path, "[[profiles]]\nname = \"other\"\nbackend = \"codex\"\n").unwrap();
+        std::fs::write(
+            &path,
+            "[[profiles]]\nname = \"other\"\nbackend = \"codex\"\n",
+        )
+        .unwrap();
         std::env::set_var("CCT_CONFIG", &path);
 
         let result = toggle_full_auto("missing", true);
@@ -747,7 +751,11 @@ base_url = "https://api.example.com/v1"
     fn toggle_full_auto_insert() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("profiles.toml");
-        std::fs::write(&path, "# comment\n[[profiles]]\nname = \"codex-test\"\nbackend = \"codex\"\n").unwrap();
+        std::fs::write(
+            &path,
+            "# comment\n[[profiles]]\nname = \"codex-test\"\nbackend = \"codex\"\n",
+        )
+        .unwrap();
         std::env::set_var("CCT_CONFIG", &path);
 
         toggle_full_auto("codex-test", true).unwrap();
