@@ -100,6 +100,7 @@ Detailed module docs are in `docs/modules/`:
 - [app](docs/modules/app.md) — cursor state, backend-filtered navigation, FormState.to_new_profile (single source of truth)
 - [ui](docs/modules/ui.md) — ratatui rendering, tab bar, backend-aware form labels, sensitive-value masking
 - [launch](docs/modules/launch.md) — arg building, exec-replace for Claude and Codex, generate_codex_config, editor open, autoinstall check
+- [cli](docs/modules/cli.md) — cct add interactive CLI flow, 5 prompts, masked summary, duplicate guard
 
 Other docs:
 - [install-script reference](docs/references/install-script.md) — curl|bash installer functions and test coverage

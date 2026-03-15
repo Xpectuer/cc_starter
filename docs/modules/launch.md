@@ -26,9 +26,9 @@ updated: 2026-03-15
 
 - `pub fn build_args(profile: &Profile, with_continue: bool) -> Vec<String>`
   - Pure function with no side effects.
-  - Constructs the ordered CLI argument list for the `claude` binary.
-  - Argument ordering: `--model <value>` (if `profile.model` is `Some`), then `--dangerously-skip-permissions` (if `profile.skip_permissions` is `Some(true)`), then `--continue` (if `with_continue` is `true`), then each element of `profile.extra_args` in order.
-  - Returns: `Vec<String>` — may be empty if all profile fields are absent or false.
+  - Constructs the ordered CLI argument list for the `claude` binary from a `Profile`.
+  - Argument ordering: `--continue` (if `with_continue` is `true`), then `--model <value>` (if `profile.model` is `Some`), then `--dangerously-skip-permissions` (if `profile.skip_permissions` is `Some(true)`), then each element of `profile.extra_args` in order.
+  - Returns: `Vec<String>` — may be empty if `with_continue` is false and all profile fields are absent or false.
 
 - `pub fn build_launch_command(profile: &Profile, with_continue: bool) -> (String, Vec<String>)`
   - Pure dispatch function; chooses the correct binary and arg builder based on `profile.backend`.
@@ -38,7 +38,8 @@ updated: 2026-03-15
 
 - `pub fn exec_claude(profile: &Profile, with_continue: bool) -> anyhow::Error`
   - Injects all key-value pairs from `profile.env` into the current process environment via `env::set_var`.
-  - Calls `build_args(profile, with_continue)` then exec-replaces the current process with `claude <args>`.
+  - Calls `build_args(profile, with_continue)` then exec-replaces the current process with `claude <args>` using `std::os::unix::process::CommandExt::exec`.
+  - `with_continue=true` prepends `--continue` to the arg list, resuming the last Claude Code session.
   - **Never returns on success** — the process image is replaced.
   - Returns: `anyhow::Error` only when `exec` itself fails.
 
@@ -151,11 +152,12 @@ None — all public surface is functions. The module consumes `crate::config::Pr
 ### Argument Ordering Contract
 
 The ordering of arguments appended by `build_args` is deterministic and tested:
-1. `--model <value>` (positional pair, only when `model` is `Some`)
-2. `--dangerously-skip-permissions` (flag, only when `skip_permissions` is `Some(true)`)
-3. Elements of `extra_args` in their original TOML order (appended verbatim)
+1. `--continue` (flag, only when `with_continue=true`) — must be first
+2. `--model <value>` (positional pair, only when `model` is `Some`)
+3. `--dangerously-skip-permissions` (flag, only when `skip_permissions` is `Some(true)`)
+4. Elements of `extra_args` in their original TOML order (appended verbatim)
 
-Callers must not assume any other ordering. The three unit tests (`build_args_empty`, `build_args_model_only`, `build_args_full`) pin this contract.
+Callers must not assume any other ordering. Unit tests pin this contract: `build_args_empty`, `build_args_model_only`, `build_args_full`, `build_args_continue_only`, `build_args_continue_with_flags`.
 
 ### Unix-Only Constraint
 
@@ -175,14 +177,20 @@ Callers must not assume any other ordering. The three unit tests (`build_args_em
 The following reproduces the actual call pattern from `src/main.rs`:
 
 ```rust
-// --- Enter key pressed: launch selected profile ---
+// --- Enter key pressed: launch selected profile (fresh session) ---
 // Step 1: restore terminal BEFORE exec (mandatory ordering)
 launch::restore_terminal();
 
 // Step 2: exec_claude replaces the process; only returns on error
-let err = launch::exec_claude(&app.profiles[app.selected]);
+let err = launch::exec_claude(&app.profiles[app.selected], false);
 
 // Step 3: exec failed — print error and exit with non-zero code
+eprintln!("Error: {err:#}");
+std::process::exit(1);
+
+// --- 'c' key pressed: resume last Claude Code session (--continue) ---
+launch::restore_terminal();
+let err = launch::exec_claude(&app.profiles[app.selected], true);
 eprintln!("Error: {err:#}");
 std::process::exit(1);
 
@@ -211,9 +219,11 @@ let profile = Profile {
     ].into()),
 };
 
-let args = launch::build_args(&profile);
+let args = launch::build_args(&profile, false);
 // args == ["--model", "claude-opus-4-6", "--verbose"]
-// (skip_permissions=false → no --dangerously-skip-permissions flag)
+
+let args_continue = launch::build_args(&profile, true);
+// args_continue == ["--continue", "--model", "claude-opus-4-6", "--verbose"]
 ```
 
 <!-- END:usage_example -->

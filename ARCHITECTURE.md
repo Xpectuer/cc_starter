@@ -70,8 +70,14 @@ User presses [Enter] (mode = Normal, active_backend = Claude)
   → launch::restore_terminal()        # disable raw mode, LeaveAlternateScreen
   → launch::exec_claude(&profile, with_continue=false)
       → env::set_var(k, v) for each profile.env entry
-      → launch::build_args(profile)   # --model, --dangerously-skip-permissions, extra_args
+      → launch::build_args(profile, false) # --model, --dangerously-skip-permissions, extra_args
       → Command::new("claude").args(...).exec()  # Unix exec — process replaced, no return
+
+User presses [c] (mode = Normal) — "Resume" / continue last session
+  → launch::restore_terminal()
+  → launch::exec_claude(&profile, true)    # with_continue=true
+      → launch::build_args(profile, true)  # --continue first, then --model, skip-perms, extra_args
+      → Command::new("claude").args(...).exec()
 ```
 
 ### Main Use Case — Launch Codex Profile

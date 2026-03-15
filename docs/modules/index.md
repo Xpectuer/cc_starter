@@ -40,8 +40,8 @@ cli ─────────────→ config
 | `config` | [docs/modules/config.md](config.md) | TOML deserialization, `Backend` enum, validation, config path resolution, profile append for Claude and Codex backends | *(leaf — no internal deps)* |
 | `app` | [docs/modules/app.md](app.md) | Cursor state, backend-filtered navigation (`filtered_indices`, `switch_backend`), `AppMode`, 5-field `FormState` with `to_new_profile()` as single source of truth | `config::Profile`, `config::Backend`, `config::NewProfile` |
 | `ui` | [docs/modules/ui.md](ui.md) | ratatui rendering: tab bar + 35/65 split filtered list + detail panel + footer; inline add-form with backend-aware `field_labels`; sensitive-value masking | `app::App`, `app::AppMode`, `app::FormState`, `app::field_labels`, `app::Backend`, `config::Profile` |
-| `launch` | [docs/modules/launch.md](launch.md) | Build CLI args for Claude and Codex; generate codex config.toml; Unix exec-replace; open `$EDITOR`; restore terminal | `config::Profile`, `config::Backend` |
-| `cli` | *(inline in src/cli.rs)* | `cct add` interactive CLI flow: 5 prompts, masked API key summary, duplicate guard | `config::NewProfile`, `config::profile_name_exists`, `config::append_profile` |
+| `launch` | [docs/modules/launch.md](launch.md) | Build CLI args for Claude and Codex (incl. `--continue`); generate codex config.toml; Unix exec-replace; open `$EDITOR`; restore terminal | `config::Profile`, `config::Backend` |
+| `cli` | [docs/modules/cli.md](cli.md) | `cct add` interactive CLI flow: 5 prompts, masked API key summary, duplicate guard | `config::NewProfile`, `config::profile_name_exists`, `config::append_profile` |
 <!-- END:module-index -->
 
 ---
@@ -134,7 +134,7 @@ graph TD
 ### launch module (`src/launch.rs`)
 
 - `fn restore_terminal()` — disable raw mode, leave alternate screen (errors suppressed)
-- `fn build_args(profile: &Profile, with_continue: bool) -> Vec<String>` — pure Claude arg builder
+- `fn build_args(profile: &Profile, with_continue: bool) -> Vec<String>` — pure Claude arg builder (`--continue` first if set, then model → skip-perms → extra)
 - `fn build_launch_command(profile: &Profile, with_continue: bool) -> (String, Vec<String>)` — pure dispatch to correct binary + arg builder
 - `fn exec_claude(profile: &Profile, with_continue: bool) -> anyhow::Error` — injects env vars, exec-replaces with claude
 - `fn check_codex_installed() -> bool` — `which codex` availability check
@@ -164,3 +164,7 @@ graph TD
 | No circular dependencies | ✅ — `config` is a pure leaf, others are consumers |
 | No orphan modules | ✅ — all 5 modules are referenced from `src/lib.rs` and used by `main.rs` |
 | `field_labels(backend)` and `FormState::to_new_profile()` use the same field index convention | ✅ — both live in `app.rs`; regression tests assert label[i] matches mapping[i] per backend |
+| `build_args` accepts `with_continue: bool` as second parameter | ✅ — verified in `src/launch.rs:13` |
+| `exec_claude` accepts `with_continue: bool` as second parameter | ✅ — verified in `src/launch.rs:43` |
+| `--continue` is prepended before `--model` in arg ordering | ✅ — verified by `build_args_continue_with_flags` unit test |
+| `cli` has dedicated module doc | ✅ — `docs/modules/cli.md` created 2026-03-15 |
